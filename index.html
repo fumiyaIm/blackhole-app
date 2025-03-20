@@ -20,14 +20,7 @@
       background-color: #000;
       touch-action: none;
     }
-    #skyCanvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 2;
-    }
+    /* パノラマ星空画像を背景として利用 */
     #skyBackground {
       position: absolute;
       top: 0;
@@ -37,9 +30,17 @@
       object-fit: cover;
       opacity: 0.8;
       z-index: 1;
-      /* transform はJSで更新 */
+      /* transform はJSで更新（左右・上下のオフセット） */
     }
-    /* 地平線はデフォルトでは画面下部に表示 */
+    #skyCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+    }
+    /* 地平線は画面下部に表示。updateHorizon()で位置を調整 */
     #horizon {
       position: absolute;
       top: 80%;
@@ -69,7 +70,7 @@
       max-width: 80%;
       z-index: 10;
     }
-    /* モーダルダイアログ（ブラックホール解説） */
+    /* ブラックホール解説用モーダルダイアログ */
     #objectInfo {
       position: fixed;
       top: 50%;
@@ -213,7 +214,8 @@
 </head>
 <body>
   <div id="container">
-    <img id="skyBackground" src="https://esahubble.org/media/archives/images/large/heic0406a.jpg" alt="Hubble Deep Field" />
+    <!-- 背景画像はパノラマ星空画像（方向に合わせて移動する） -->
+    <img id="skyBackground" src="https://upload.wikimedia.org/wikipedia/commons/e/ed/Milky_Way_Panorama_%28cropped%29.jpg" alt="Starry Sky" />
     <canvas id="skyCanvas"></canvas>
     <div id="horizon">
       <div class="horizon-label">地平線</div>
@@ -221,7 +223,6 @@
     <div id="controls">
       <button class="control-btn" id="resetViewBtn">視点リセット</button>
       <button class="control-btn" id="toggleSensorsBtn">センサー切替</button>
-      <button class="control-btn" id="changeImageBtn">背景変更</button>
     </div>
     <div id="info">
       <h3>ブラックホール観測アプリ</h3>
@@ -230,7 +231,7 @@
       <p>視野内のブラックホール: <span id="visibleCount">0</span></p>
       <p>操作: 画面をドラッグして視点移動</p>
     </div>
-    <!-- モーダルダイアログ（非表示状態） -->
+    <!-- ブラックホール解説ダイアログ -->
     <div id="objectInfo">
       <h3 id="objectName"></h3>
       <p id="objectDistance"></p>
@@ -252,35 +253,27 @@
   </div>
 
   <script>
-    // ヘルパー関数：値のクランプ
+    // ヘルパー：値のクランプ
     function clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
     }
 
     // グローバル変数
     let canvas, ctx;
-    let latitude = 35.6895, longitude = 139.6917; // デフォルト（東京）
+    let latitude = 35.6895, longitude = 139.6917; // デフォルト：東京
     let alpha = 0, beta = 45, gamma = 0; // センサー値
     let markers = [];
     let stars = [];
     let isRunning = false;
     let useSensors = false; // デフォルトは手動操作
-    // マニュアル視点制御
+    // マニュアル視点
     let manualAzimuth = 0;
     let manualAltitude = 45;
     let touchStartX = 0, touchStartY = 0;
     let touchLastX = 0, touchLastY = 0;
     let isDragging = false;
 
-    // 背景画像プリロード
-    const hubbleImages = [
-      "https://esahubble.org/media/archives/images/large/heic0406a.jpg",
-      "https://esahubble.org/media/archives/images/large/heic1502a.jpg",
-      "https://esahubble.org/media/archives/images/large/potw1345a.jpg",
-      "https://esahubble.org/media/archives/images/large/opo9944a.jpg",
-      "https://esahubble.org/media/archives/images/large/heic0715a.jpg"
-    ];
-    let currentImageIndex = 0;
+    // ※ 背景画像は固定のパノラマ星空画像を利用（changeImage ボタンは省略）
 
     // ブラックホールデータ
     const blackholes = [
@@ -386,12 +379,10 @@
 
         document.getElementById('resetViewBtn').addEventListener('click', resetView);
         document.getElementById('toggleSensorsBtn').addEventListener('click', toggleSensors);
-        document.getElementById('changeImageBtn').addEventListener('click', changeBackgroundImage);
         document.getElementById('closeDialog').addEventListener('click', function() {
           document.getElementById('objectInfo').style.display = 'none';
         });
 
-        preloadImages();
         window.addEventListener('resize', handleResize);
 
         document.getElementById('loadingScreen').style.display = 'none';
@@ -465,21 +456,37 @@
       }
     }
 
-    // 画像プリロード
-    function preloadImages() {
-      hubbleImages.forEach(src => {
-        const img = new Image();
-        img.src = src;
-      });
+    // 背景画像移動：センサー（または手動）の水平・垂直の値に応じて translateX/Y を設定  
+    function updateBackgroundPosition() {
+      // 水平方向は α（または manualAzimuth）から ±最大50%オフセット
+      let currentAzimuth = useSensors ? alpha : manualAzimuth;
+      let normalizedAzimuth = ((currentAzimuth + 180) % 360) - 180;
+      const maxOffsetX = window.innerWidth * 0.5;
+      let offsetX = (normalizedAzimuth / 180) * maxOffsetX;
+      // 垂直方向は、センサーの場合は beta の半分を 45°中心に（0～90°にクランプ）、手動の場合は manualAltitude を使用  
+      let currentAltitude = useSensors ? clamp(45 + beta / 2, 0, 90) : manualAltitude;
+      const maxOffsetY = window.innerHeight * 0.3;
+      let offsetY = ((currentAltitude - 45) / 45) * maxOffsetY;
+      document.getElementById('skyBackground').style.transform = `translate(${offsetX}px, ${offsetY}px)`;
     }
 
-    // 背景画像切替
-    function changeBackgroundImage() {
-      currentImageIndex = (currentImageIndex + 1) % hubbleImages.length;
-      document.getElementById('skyBackground').src = hubbleImages[currentImageIndex];
+    // 地平線位置更新（デバイスの傾きに合わせ上下移動）
+    function updateHorizon() {
+      let currentAltitude = useSensors ? clamp(45 + beta / 2, 0, 90) : manualAltitude;
+      let horizonY = window.innerHeight - (currentAltitude / 90) * (window.innerHeight * 0.5);
+      document.getElementById('horizon').style.top = `${horizonY}px`;
     }
 
-    // センサー未対応時の固定方向
+    // 天球全体の更新（連続更新）
+    function updateSky() {
+      if (!isRunning) return;
+      updateBackgroundPosition();
+      updateHorizon();
+      updateBlackholeMarkers();
+      requestAnimationFrame(updateSky);
+    }
+
+    // センサー未対応時の固定方向設定
     function useFallbackOrientation() {
       useSensors = false;
       document.getElementById('toggleSensorsBtn').textContent = 'センサーON';
@@ -497,19 +504,18 @@
       document.getElementById('direction').textContent = `${directions[index]} (${heading.toFixed(1)}°)`;
     }
 
-    // センサーによる向き更新
+    // センサーによる向き更新（α, β, γ の値を取得し、手動視点に反映）
     function handleOrientation(event) {
       if (!useSensors) return;
       try {
         alpha = event.alpha || 0;
         beta = event.beta || 0;
         gamma = event.gamma || 0;
-        // センサー値から方位（水平）は 360 - alpha
         let heading = 360 - alpha;
         if (heading < 0) heading += 360;
         if (heading > 360) heading -= 360;
         manualAzimuth = heading;
-        // 上下の傾きを反映：ここでは beta の値を使い、45 + beta/2（0～90にクランプ）とする
+        // beta の値を利用して上下方向：45 + (beta/2) を 0～90°にクランプ
         manualAltitude = clamp(45 + beta / 2, 0, 90);
         updateDirectionText(heading);
       } catch (error) {
@@ -596,12 +602,11 @@
       isDragging = false;
     }
 
-    // 視点リセット：手動視点をリセットし、かつセンサー連動に戻す
+    // 視点リセット：手動視点をリセットし、センサー連動に戻す
     function resetView() {
       manualAzimuth = 0;
       manualAltitude = 45;
       updateDirectionText(manualAzimuth);
-      // センサーを再度有効にする
       useSensors = true;
       document.getElementById('toggleSensorsBtn').textContent = 'センサーOFF';
       updateBlackholeMarkers();
@@ -623,31 +628,68 @@
       updateBlackholeMarkers();
     }
 
-    // 背景画像移動（左右の移動をより大きくする）
-    function updateBackgroundPosition() {
-      let currentAzimuth = useSensors ? alpha : manualAzimuth;
-      // heading と同等になるように：normalize (-180～180)
-      let normalizedAzimuth = ((currentAzimuth + 180) % 360) - 180;
-      const maxOffset = window.innerWidth * 0.5; // 移動範囲拡大
-      let offsetX = (normalizedAzimuth / 180) * maxOffset;
-      document.getElementById('skyBackground').style.transform = `translateX(${offsetX}px)`;
+    // ブラックホールマーカー更新
+    function updateBlackholeMarkers() {
+      try {
+        markers.forEach(marker => {
+          if (marker.element && marker.element.parentNode) {
+            marker.element.parentNode.removeChild(marker.element);
+          }
+        });
+        markers = [];
+        const now = new Date();
+        let visibleCount = 0;
+        blackholes.forEach(blackhole => {
+          try {
+            const horizontal = equatorialToHorizontal(blackhole.ra, blackhole.dec, latitude, longitude, now);
+            const isAboveHorizon = horizontal.altitude >= 0;
+            const screenPos = calculateScreenPosition(horizontal.azimuth, horizontal.altitude);
+            if (screenPos.isVisible && (isAboveHorizon || horizontal.altitude > -10)) {
+              createBlackholeMarker(blackhole, screenPos.x, screenPos.y, isAboveHorizon, horizontal.altitude);
+              if (isAboveHorizon) visibleCount++;
+            }
+          } catch (error) {
+            console.warn(`ブラックホール「${blackhole.name}」処理エラー:`, error);
+          }
+        });
+        document.getElementById('visibleCount').textContent = visibleCount;
+      } catch (error) {
+        console.error('マーカー更新エラー:', error);
+        createBlackholeMarkers();
+      }
     }
 
-    // 地平線位置更新（デバイスの傾きに応じて）
-    function updateHorizon() {
-      let currentAltitude = useSensors ? clamp(45 + beta / 2, 0, 90) : manualAltitude;
-      // 画面下部半分の範囲で動かす
-      let horizonY = window.innerHeight - (currentAltitude / 90) * (window.innerHeight * 0.5);
-      document.getElementById('horizon').style.top = `${horizonY}px`;
+    // ブラックホールマーカー作成
+    function createBlackholeMarker(blackhole, x, y, isAboveHorizon, altitude) {
+      const marker = document.createElement('div');
+      marker.className = 'blackhole-marker';
+      marker.style.left = `${x}px`;
+      marker.style.top = `${y}px`;
+      if (!isAboveHorizon) {
+        const opacity = (altitude + 10) / 10 * 0.5;
+        marker.style.opacity = opacity;
+        marker.style.border = '1px solid rgba(255, 0, 0, 0.8)';
+        marker.style.backgroundColor = 'rgba(100, 0, 0, 0.5)';
+      }
+      marker.addEventListener('click', function() {
+        showBlackholeInfo(blackhole, isAboveHorizon);
+      });
+      document.getElementById('container').appendChild(marker);
+      markers.push({ element: marker, blackhole: blackhole, isAboveHorizon: isAboveHorizon });
     }
 
-    // 天球全体の更新（requestAnimationFrame で連続更新）
-    function updateSky() {
-      if (!isRunning) return;
-      updateBackgroundPosition();
-      updateHorizon();
-      updateBlackholeMarkers();
-      requestAnimationFrame(updateSky);
+    // ブラックホール情報ダイアログ表示
+    function showBlackholeInfo(blackhole, isAboveHorizon) {
+      const infoDialog = document.getElementById('objectInfo');
+      document.getElementById('objectName').textContent = blackhole.name;
+      document.getElementById('objectDistance').textContent = `距離: ${blackhole.distance}`;
+      document.getElementById('objectMass').textContent = `質量: ${blackhole.mass}`;
+      let description = blackhole.description;
+      if (!isAboveHorizon) {
+        description += "\n（注意：この天体は現在地平線より下にあります）";
+      }
+      document.getElementById('objectDescription').textContent = description;
+      infoDialog.style.display = 'block';
     }
 
     // ユリウス日計算
@@ -726,74 +768,6 @@
         console.warn('スクリーン位置計算エラー:', error);
         return { x: canvas.width / 2, y: canvas.height / 2, isVisible: true };
       }
-    }
-
-    // ブラックホールマーカー更新
-    function updateBlackholeMarkers() {
-      try {
-        markers.forEach(marker => {
-          if (marker.element && marker.element.parentNode) {
-            marker.element.parentNode.removeChild(marker.element);
-          }
-        });
-        markers = [];
-        const now = new Date();
-        let visibleCount = 0;
-        blackholes.forEach(blackhole => {
-          try {
-            const horizontal = equatorialToHorizontal(
-              blackhole.ra, blackhole.dec, latitude, longitude, now
-            );
-            const isAboveHorizon = horizontal.altitude >= 0;
-            const screenPos = calculateScreenPosition(
-              horizontal.azimuth, horizontal.altitude
-            );
-            if (screenPos.isVisible && (isAboveHorizon || horizontal.altitude > -10)) {
-              createBlackholeMarker(blackhole, screenPos.x, screenPos.y, isAboveHorizon, horizontal.altitude);
-              if (isAboveHorizon) visibleCount++;
-            }
-          } catch (error) {
-            console.warn(`ブラックホール「${blackhole.name}」処理エラー:`, error);
-          }
-        });
-        document.getElementById('visibleCount').textContent = visibleCount;
-      } catch (error) {
-        console.error('マーカー更新エラー:', error);
-        createBlackholeMarkers();
-      }
-    }
-
-    // ブラックホールマーカー作成
-    function createBlackholeMarker(blackhole, x, y, isAboveHorizon, altitude) {
-      const marker = document.createElement('div');
-      marker.className = 'blackhole-marker';
-      marker.style.left = `${x}px`;
-      marker.style.top = `${y}px`;
-      if (!isAboveHorizon) {
-        const opacity = (altitude + 10) / 10 * 0.5;
-        marker.style.opacity = opacity;
-        marker.style.border = '1px solid rgba(255, 0, 0, 0.8)';
-        marker.style.backgroundColor = 'rgba(100, 0, 0, 0.5)';
-      }
-      marker.addEventListener('click', function() {
-        showBlackholeInfo(blackhole, isAboveHorizon);
-      });
-      document.getElementById('container').appendChild(marker);
-      markers.push({ element: marker, blackhole: blackhole, isAboveHorizon: isAboveHorizon });
-    }
-
-    // ブラックホール情報ダイアログ表示
-    function showBlackholeInfo(blackhole, isAboveHorizon) {
-      const infoDialog = document.getElementById('objectInfo');
-      document.getElementById('objectName').textContent = blackhole.name;
-      document.getElementById('objectDistance').textContent = `距離: ${blackhole.distance}`;
-      document.getElementById('objectMass').textContent = `質量: ${blackhole.mass}`;
-      let description = blackhole.description;
-      if (!isAboveHorizon) {
-        description += "\n（注意：この天体は現在地平線より下にあります）";
-      }
-      document.getElementById('objectDescription').textContent = description;
-      infoDialog.style.display = 'block';
     }
   </script>
 </body>
