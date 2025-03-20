@@ -1,4 +1,223 @@
-<!DOCTYPE html>
+        // グローバル変数
+        let canvas, ctx;
+        let latitude = 35.6895, longitude = 139.6917; // デフォルト位置（東京）
+        let alpha = 0, beta = 45, gamma = 0; // デフォルトの向き
+        let markers = [];
+        let isRunning = false;
+        let stars = [];
+        let debugMode = true; // デバッグモードを強制的に有効化
+        let useSensors = true; // センサー使用フラグ
+        
+        // マニュアル視点制御用変数
+        let manualAzimuth = 0;   // 手動方位角
+        let manualAltitude = 45; // 手動高度
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchLastX = 0;
+        let touchLastY = 0;
+        let isDragging = false;
+
+        // 背景画像のプリロード
+        const hubbleImages = [
+            "https://esahubble.org/media/archives/images/large/heic0406a.jpg", // ハッブル・ウルトラ・ディープ・フィールド
+            "https://esahubble.org/media/archives/images/large/heic1502a.jpg", // アンドロメダ銀河
+            "https://esahubble.org/media/archives/images/large/potw1345a.jpg", // 猫の目星雲
+            "https://esahubble.org/media/archives/images/large/opo9944a.jpg",  // わし星雲
+            "https://esahubble.org/media/archives/images/large/heic0715a.jpg"  // カリーナ星雲
+        ];
+        let currentImageIndex = 0;
+        const preloadedImages = [];
+        
+        // 背景画像をプリロード
+        function preloadImages() {
+            hubbleImages.forEach((src, index) => {
+                preloadedImages[index] = new Image();
+                preloadedImages[index].src = src;
+            });
+        }
+        
+        // 次の背景画像に切り替え
+        function changeBackgroundImage() {
+            currentImageIndex = (currentImageIndex + 1) % hubbleImages.length;
+            document.getElementById('skyBackground').src = hubbleImages[currentImageIndex];
+        }
+
+        // デバッグログ関数
+        function debugLog(message) {
+            if (debugMode) {
+                const debugElement = document.getElementById('debug');
+                if (debugElement) {
+                    debugElement.style.display = 'block';
+                    const timestamp = new Date().toLocaleTimeString();
+                    debugElement.innerHTML += `${timestamp}: ${message}<br>`;
+                    debugElement.scrollTop = debugElement.scrollHeight;
+                }
+                console.log(message);
+            }
+        }
+
+        // エラー表示オーバーレイ
+        function showErrorOverlay(title, message) {
+            const existingOverlay = document.getElementById('errorOverlay');
+            if (existingOverlay) {
+                document.body.removeChild(existingOverlay);
+            }
+            
+            const overlay = document.createElement('div');
+            overlay.id = 'errorOverlay';
+            overlay.innerHTML = `
+                <div class="error-container">
+                    <h3>${title}</h3>
+                    <p>${message}</p>
+                    <button onclick="this.parentNode.parentNode.style.display='none';">閉じる</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+
+        // ブラックホールのデータベース
+        const blackholes = [
+            {
+                name: "いて座A*（Sgr A*）",
+                ra: 266.4168, // 赤経 (度)
+                dec: -29.0078, // 赤緯 (度)
+                distance: "2.6万光年",
+                mass: "約400万太陽質量",
+                description: "天の川銀河の中心に位置する超大質量ブラックホール。2022年に初めて直接撮影されました。"
+            },
+            {
+                name: "M87銀河中心ブラックホール",
+                ra: 187.7059,
+                dec: 12.3911,
+                distance: "5,500万光年",
+                mass: "約65億太陽質量",
+                description: "おとめ座銀河団のM87銀河の中心に位置する超大質量ブラックホール。2019年にイベント・ホライズン・テレスコープによって史上初めて撮影されました。"
+            },
+            {
+                name: "シグナス X-1",
+                ra: 299.5903,
+                dec: 35.2016,
+                distance: "約6,000光年",
+                mass: "約15太陽質量",
+                description: "はくちょう座に位置する恒星質量ブラックホール。X線連星系で、伴星からの物質を降着しています。"
+            },
+            {
+                name: "GW150914",
+                ra: 129.1,
+                dec: -70.3,
+                distance: "約13億光年",
+                mass: "合体前: 36太陽質量と29太陽質量、合体後: 62太陽質量",
+                description: "2015年に重力波で初めて検出されたブラックホール連星の合体イベント。"
+            },
+            {
+                name: "Swift J1644+57",
+                ra: 251.2059,
+                dec: 57.5853,
+                distance: "約38億光年",
+                mass: "推定数百万太陽質量",
+                description: "潮汐破壊現象が観測された超大質量ブラックホール。星が近づきすぎて破壊されるイベントが観測されました。"
+            },
+            {
+                name: "TON 618",
+                ra: 193.3208,
+                dec: 27.0500,
+                distance: "約103億光年",
+                mass: "約660億太陽質量",
+                description: "既知の中で最も質量の大きいブラックホールの一つ。クエーサーの中心に位置しています。"
+            },
+            {
+                name: "V404 Cygni",
+                ra: 306.0159,
+                dec: 33.8678,
+                distance: "約7,800光年",
+                mass: "約9太陽質量",
+                description: "はくちょう座に位置する恒星質量ブラックホール。2015年に強いアウトバーストが観測されました。"
+            },
+            {
+                name: "IC 1101中心ブラックホール",
+                ra: 229.5354,
+                dec: 27.9767,
+                distance: "約10億光年",
+                mass: "約400億太陽質量",
+                description: "既知の中で最大の銀河の一つであるIC 1101の中心に位置すると考えられる超大質量ブラックホール。"
+            },
+            {
+                name: "NGC 3842中心ブラックホール",
+                ra: 176.0085,
+                dec: 19.9498,
+                distance: "約3.3億光年",
+                mass: "約100億太陽質量",
+                description: "しし座銀河団の楕円銀河NGC 3842の中心に位置する超大質量ブラックホール。"
+            },
+            {
+                name: "GW170817",
+                ra: 197.4500,
+                dec: -23.3833,
+                distance: "約1.3億光年",
+                mass: "合体後: 約2.7太陽質量",
+                description: "2017年に検出された中性子星の合体イベント。合体後にブラックホールが形成された可能性があります。"
+            }
+        ];
+
+        // エラーメッセージを表示
+        function showError(message) {
+            const errorElement = document.getElementById('errorMessage');
+            if (errorElement) {
+                errorElement.textContent = message;
+                errorElement.style.display = 'block';
+            }
+            debugLog('ERROR: ' + message);
+        }
+
+        // 星を生成
+        function generateStars() {
+            debugLog('星を生成中...');
+            stars = [];
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            
+            for (let i = 0; i < 200; i++) {
+                stars.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    radius: Math.random() * 1.5,
+                    opacity: Math.random() * 0.8 + 0.2
+                });
+            }
+            debugLog(`${stars.length}個の星を生成完了`);
+        }
+
+        // キャンバスリサイズ
+        function resizeCanvas() {
+            debugLog('キャンバスをリサイズ中...');
+            if (!canvas) return;
+            
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            generateStars();
+            drawSky();
+            if (isRunning) {
+                updateBlackholeMarkers();
+            }
+        }
+
+        // ユリウス日を取得
+        function getJulianDate(date) {
+            const time = date.getTime();
+            return (time / 86400000) + 2440587.5;
+        }
+
+        // ローカル恒星時を計算
+        function getLocalSiderealTime(jd, longitude) {
+            try {
+                const T = (jd - 2451545.0) / 36525;
+                // グリニッジ恒星時
+                let theta = 280.46061837 + 360.98564736629 * (jd - 2451545.0) +
+                           0.000387933 * T * T - T * T * T / 38710000;
+                
+                // 経度を時間に変換して加算（東経は加算、西経は減算）
+                theta += longitude;
+                <!DOCTYPE html>
 <html lang="ja">
 <head>
     <!-- モバイルブラウザのキャッシュを無効化するメタタグ -->
@@ -244,7 +463,7 @@
             <h2>ブラックホール観測アプリへようこそ</h2>
             <p>このアプリはデバイスの位置情報とジャイロスコープセンサーを使用して、スマートフォンが向いている方向の天球と視野内のブラックホール天体を表示します。</p>
             <p>位置情報やセンサーへのアクセスが許可されない場合でも、デフォルト設定で利用できます。</p>
-            <button id="startButton" onclick="initApp()">スタート</button>
+            <button id="realStartButton">スタート</button>
             <p id="errorMessage" class="error-text"></p>
         </div>
         <div id="loadingScreen">
@@ -489,6 +708,314 @@
                 // 簡易的な恒星時（おおよその値）
                 return (hours + minutes / 60) * 15 + longitude;
             }
+        }
+
+        // 赤経・赤緯から方位角・高度を計算
+        function equatorialToHorizontal(ra, dec, lat, lon, date) {
+            try {
+                // 時角を計算（ローカル恒星時 - 赤経）
+                const jd = getJulianDate(date);
+                const lst = getLocalSiderealTime(jd, lon);
+                const ha = lst - ra;
+                
+                // ラジアンに変換
+                const decRad = dec * Math.PI / 180;
+                const latRad = lat * Math.PI / 180;
+                const haRad = ha * 15 * Math.PI / 180; // 時角は時間単位なので15を掛けて度に変換
+                
+                // 高度を計算
+                const sinAlt = Math.sin(decRad) * Math.sin(latRad) + 
+                              Math.cos(decRad) * Math.cos(latRad) * Math.cos(haRad);
+                const alt = Math.asin(sinAlt) * 180 / Math.PI;
+                
+                // 方位角を計算
+                const cosA = (Math.sin(decRad) - Math.sin(latRad) * sinAlt) / 
+                            (Math.cos(latRad) * Math.cos(Math.asin(sinAlt)));
+                let az = Math.acos(Math.max(-1, Math.min(1, cosA))) * 180 / Math.PI;
+                
+                // 時角が正の場合、方位角を360から引く
+                if (Math.sin(haRad) > 0) {
+                    az = 360 - az;
+                }
+                
+                return { azimuth: az, altitude: alt };
+            } catch (error) {
+                debugLog('座標変換エラー: ' + error);
+                // エラーの場合はデフォルト値を返す
+                return { azimuth: 0, altitude: 45 };
+            }
+        }
+
+        // スクリーン座標を計算
+        function calculateScreenPosition(azimuth, altitude) {
+            try {
+                // デバイスの向きから視野角を計算
+                const fovHorizontal = 60; // 水平視野角（度）
+                const fovVertical = fovHorizontal * (canvas.height / canvas.width); // アスペクト比に応じた垂直視野角
+                
+                // 現在の方向（センサーまたは手動）
+                let centerAzimuth, centerAltitude;
+                
+                if (useSensors) {
+                    // センサーからの値を使用
+                    centerAzimuth = alpha;
+                    centerAltitude = 90 - Math.abs(beta);
+                } else {
+                    // 手動設定値を使用
+                    centerAzimuth = manualAzimuth;
+                    centerAltitude = manualAltitude;
+                }
+                
+                // 方位角の差（画面の水平位置）
+                let deltaAz = azimuth - centerAzimuth;
+                // -180から180の範囲に正規化
+                if (deltaAz > 180) deltaAz -= 360;
+                if (deltaAz < -180) deltaAz += 360;
+                
+                // 高度の差（画面の垂直位置）
+                const deltaAlt = altitude - centerAltitude;
+                
+                // 視野角に対する相対位置を計算（-1から1の範囲）
+                const xRatio = deltaAz / (fovHorizontal / 2);
+                const yRatio = -deltaAlt / (fovVertical / 2); // 高度は上が正なので反転
+                
+                // スクリーン座標に変換
+                const x = (xRatio * 0.5 + 0.5) * canvas.width;
+                const y = (yRatio * 0.5 + 0.5) * canvas.height;
+                
+                // 視野内かどうかを判定
+                const isVisible = Math.abs(xRatio) <= 1 && Math.abs(yRatio) <= 1;
+                
+                return { x, y, isVisible };
+            } catch (error) {
+                debugLog('スクリーン位置計算エラー: ' + error);
+                // エラーの場合は画面中央を返す
+                return { 
+                    x: canvas.width / 2, 
+                    y: canvas.height / 2, 
+                    isVisible: true 
+                };
+            }
+        }
+
+        // 天球描画
+        function drawSky() {
+            if (!ctx) {
+                debugLog('キャンバスコンテキストがありません');
+                return;
+            }
+            
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            // 背景は透明に（背景画像が下にあるため）
+            ctx.clearRect(0, 0, width, height);
+            
+            // 星は薄く描画（Hubble画像の上に追加）
+            ctx.fillStyle = 'white';
+            stars.forEach(star => {
+                ctx.globalAlpha = star.opacity * 0.5;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // アルファ値をリセット
+            ctx.globalAlpha = 1.0;
+        }
+
+        // 天球更新
+        function updateSky() {
+            if (!isRunning) return;
+            
+            // 天球を描画
+            drawSky();
+            
+            // マーカーを更新
+            updateBlackholeMarkers();
+        }
+
+        // ブラックホールマーカーを更新
+        function updateBlackholeMarkers() {
+            try {
+                // 既存のマーカーを削除
+                markers.forEach(marker => {
+                    if (marker.element && marker.element.parentNode) {
+                        marker.element.parentNode.removeChild(marker.element);
+                    }
+                });
+                markers = [];
+                
+                // 現在時刻
+                const now = new Date();
+                
+                // 視野内のブラックホール数
+                let visibleCount = 0;
+                
+                // 各ブラックホールの位置を計算
+                blackholes.forEach(blackhole => {
+                    try {
+                        // 地平座標に変換
+                        const horizontal = equatorialToHorizontal(
+                            blackhole.ra, blackhole.dec, latitude, longitude, now
+                        );
+                        
+                        // 地平線との関係を判定
+                        const isAboveHorizon = horizontal.altitude >= 0;
+                        
+                        // スクリーン座標に変換
+                        const screenPos = calculateScreenPosition(
+                            horizontal.azimuth, horizontal.altitude
+                        );
+                        
+                        // 視野内かつ地平線以上の場合にマーカーを作成
+                        // または地平線以下でも高度 > -10度なら薄く表示
+                        if (screenPos.isVisible && (isAboveHorizon || horizontal.altitude > -10)) {
+                            createBlackholeMarker(blackhole, screenPos.x, screenPos.y, isAboveHorizon, horizontal.altitude);
+                            if (isAboveHorizon) {
+                                visibleCount++;
+                            }
+                        }
+                    } catch (bherror) {
+                        debugLog(`ブラックホール「${blackhole.name}」の処理中にエラー: ${bherror}`);
+                    }
+                });
+                
+                // 視野内のブラックホール数を更新
+                const countElement = document.getElementById('visibleCount');
+                if (countElement) {
+                    countElement.textContent = visibleCount;
+                }
+            } catch (error) {
+                debugLog('マーカー更新エラー: ' + error);
+            }
+        }
+
+        // ブラックホールマーカーを作成
+        function createBlackholeMarker(blackhole, x, y, isAboveHorizon, altitude) {
+            try {
+                const marker = document.createElement('div');
+                marker.className = 'blackhole-marker';
+                marker.style.left = `${x}px`;
+                marker.style.top = `${y}px`;
+                
+                // 地平線以下の場合は薄く表示
+                if (!isAboveHorizon) {
+                    // 高度に応じて透明度を変更（-10度で完全透明、0度で半透明）
+                    const opacity = (altitude + 10) / 10 * 0.5;
+                    marker.style.opacity = opacity;
+                    marker.style.border = '1px solid rgba(255, 0, 0, 0.8)';
+                    marker.style.backgroundColor = 'rgba(100, 0, 0, 0.5)';
+                }
+                
+                // クリックイベント
+                marker.addEventListener('click', () => {
+                    showBlackholeInfo(blackhole, isAboveHorizon);
+                });
+                
+                document.getElementById('container').appendChild(marker);
+                
+                // マーカーを記録
+                markers.push({
+                    element: marker,
+                    blackhole: blackhole,
+                    isAboveHorizon: isAboveHorizon
+                });
+            } catch (error) {
+                debugLog('マーカー作成エラー: ' + error);
+            }
+        }
+
+        // ブラックホール情報を表示
+        function showBlackholeInfo(blackhole, isAboveHorizon) {
+            const infoPanel = document.getElementById('objectInfo');
+            document.getElementById('objectName').textContent = blackhole.name;
+            document.getElementById('objectDistance').textContent = `距離: ${blackhole.distance}`;
+            document.getElementById('objectMass').textContent = `質量: ${blackhole.mass}`;
+            
+            // 地平線情報を追加
+            let description = blackhole.description;
+            if (!isAboveHorizon) {
+                description += "\n（注意：この天体は現在地平線より下にあります）";
+            }
+            document.getElementById('objectDescription').textContent = description;
+            
+            infoPanel.style.display = 'block';
+            
+            // 5秒後に非表示
+            setTimeout(() => {
+                infoPanel.style.display = 'none';
+            }, 5000);
+        }
+
+        // 方角テキスト更新
+        function updateDirectionText(heading) {
+            const directions = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"];
+            const index = Math.round(heading / 45) % 8;
+            const dirElement = document.getElementById('direction');
+            if (dirElement) {
+                dirElement.textContent = `${directions[index]} (${heading.toFixed(1)}°)`;
+            }
+        }
+
+        // デバイスの向きハンドラ
+        function handleOrientation(event) {
+            // センサーが無効化されている場合は何もしない
+            if (!useSensors) return;
+            
+            try {
+                // iOS/Androidの違いを吸収
+                alpha = event.alpha || 0; // z軸周りの回転 (0-360)
+                beta = event.beta || 0;   // x軸周りの回転 (-180-180)
+                gamma = event.gamma || 0; // y軸周りの回転 (-90-90)
+                
+                // 方角を計算
+                let heading = 360 - alpha;
+                if (heading < 0) heading += 360;
+                if (heading > 360) heading -= 360;
+                
+                // マニュアル値を同期
+                manualAzimuth = heading;
+                manualAltitude = 90 - Math.abs(beta);
+                
+                // 方角を表示
+                updateDirectionText(heading);
+            } catch (error) {
+                console.warn('向き検出エラー:', error);
+                debugLog('向き検出エラー: ' + error);
+                // エラー時はデフォルト値を使用
+                useSensors = false;
+                const sensorBtn = document.getElementById('toggleSensorsBtn');
+                if (sensorBtn) {
+                    sensorBtn.textContent = 'センサーON';
+                }
+            }
+        }
+
+        // フォールバック方向設定（センサーが使えない場合）
+        function useFallbackOrientation() {
+            debugLog('フォールバック方向モードを設定');
+            const infoElement = document.getElementById('info');
+            if (infoElement) {
+                const warningP = document.createElement('p');
+                warningP.style.color = 'yellow';
+                warningP.textContent = '⚠️ 方向センサーが利用できないため、手動操作モードになります';
+                infoElement.appendChild(warningP);
+            }
+            
+            // マニュアルモードに設定
+            useSensors = false;
+            const sensorBtn = document.getElementById('toggleSensorsBtn');
+            if (sensorBtn) {
+                sensorBtn.textContent = 'センサーON';
+            }
+            
+            // 固定方向に設定
+            alpha = 0; // 北向き
+            beta = 45; // 45度上向き
+            manualAzimuth = 0;
+            manualAltitude = 45;
+            updateDirectionText(0);
         }
 
         // 赤経・赤緯から方位角・高度を計算
