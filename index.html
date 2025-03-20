@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+    <!-- モバイルブラウザのキャッシュを無効化するメタタグ -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="description" content="スマートフォンで操作閲覧できるブラックホール天体観測アプリ。スマホ画面に今向いている方向の天球とブラックホール天体を表示します。">
@@ -240,7 +244,7 @@
             <h2>ブラックホール観測アプリへようこそ</h2>
             <p>このアプリはデバイスの位置情報とジャイロスコープセンサーを使用して、スマートフォンが向いている方向の天球と視野内のブラックホール天体を表示します。</p>
             <p>位置情報やセンサーへのアクセスが許可されない場合でも、デフォルト設定で利用できます。</p>
-            <button id="startButton">スタート</button>
+            <button id="startButton" onclick="initApp()">スタート</button>
             <p id="errorMessage" class="error-text"></p>
         </div>
         <div id="loadingScreen">
