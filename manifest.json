@@ -1,0 +1,20 @@
+{
+    "name": "ブラックホール観測アプリ",
+    "short_name": "ブラックホール",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#000033",
+    "theme_color": "#000033",
+    "icons": [
+      {
+        "src": "/icon-192.png",
+        "sizes": "192x192",
+        "type": "image/png"
+      },
+      {
+        "src": "/icon-512.png",
+        "sizes": "512x512",
+        "type": "image/png"
+      }
+    ]
+  }
