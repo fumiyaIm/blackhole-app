@@ -240,7 +240,8 @@
             <h2>ブラックホール観測アプリへようこそ</h2>
             <p>このアプリはデバイスの位置情報とジャイロスコープセンサーを使用して、スマートフォンが向いている方向の天球と視野内のブラックホール天体を表示します。</p>
             <p>位置情報やセンサーへのアクセスが許可されない場合でも、デフォルト設定で利用できます。</p>
-            <button id="startBtn">スタート</button>
+            <button id="startBtn" onclick="startApp()">スタート</button>
+            <button id="directStartBtn" onclick="directStart()" style="background-color: #FF9800;">強制スタート（問題がある場合）</button>
             <p id="errorMessage" class="error-text"></p>
         </div>
         <div id="loadingScreen">
@@ -251,24 +252,28 @@
     </div>
 
     <script>
-        // グローバル変数
-        let canvas, ctx;
-        let latitude = 35.6895, longitude = 139.6917; // デフォルト位置（東京）
-        let alpha = 0, beta = 45, gamma = 0; // デフォルトの向き
-        let markers = [];
-        let isRunning = false;
-        let stars = [];
-        let debugMode = false; // デバッグモード
-        let useSensors = true; // センサー使用フラグ
+        // グローバル変数を window オブジェクトに直接格納して、グローバルスコープを確保
+        window.canvas = null;
+        window.ctx = null;
+        window.latitude = 35.6895;
+        window.longitude = 139.6917; // デフォルト位置（東京）
+        window.alpha = 0;
+        window.beta = 45;
+        window.gamma = 0; // デフォルトの向き
+        window.markers = [];
+        window.isRunning = false;
+        window.stars = [];
+        window.debugMode = true; // デバッグモードを強制的に有効化
+        window.useSensors = true; // センサー使用フラグ
         
         // マニュアル視点制御用変数
-        let manualAzimuth = 0;   // 手動方位角
-        let manualAltitude = 45; // 手動高度
-        let touchStartX = 0;
-        let touchStartY = 0;
-        let touchLastX = 0;
-        let touchLastY = 0;
-        let isDragging = false;
+        window.manualAzimuth = 0;   // 手動方位角
+        window.manualAltitude = 45; // 手動高度
+        window.touchStartX = 0;
+        window.touchStartY = 0;
+        window.touchLastX = 0;
+        window.touchLastY = 0;
+        window.isDragging = false;
 
         // 背景画像のプリロード
         const hubbleImages = [
