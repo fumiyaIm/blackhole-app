@@ -18,6 +18,7 @@
             width: 100vw;
             height: 100vh;
             background-color: #000;
+            overflow: hidden;
         }
         #skyCanvas {
             position: absolute;
@@ -26,6 +27,25 @@
             width: 100%;
             height: 100%;
             z-index: 2;
+        }
+        #starField {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            transform-style: preserve-3d;
+            perspective: 1000px;
+        }
+        .star {
+            position: absolute;
+            width: 2px;
+            height: 2px;
+            background-color: white;
+            border-radius: 50%;
+            transform-style: preserve-3d;
+            will-change: transform;
         }
         #info {
             position: absolute;
@@ -36,7 +56,6 @@
             border-radius: 10px;
             max-width: 80%;
             z-index: 10;
-            transition: all 0.5s ease;
         }
         #objectInfo {
             position: absolute;
@@ -97,7 +116,7 @@
             left: 0;
             width: 100%;
             height: 20%;
-            background: linear-gradient(0deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%);
+            background: linear-gradient(0deg, rgba(0,40,0,0.8) 0%, rgba(0,0,0,0) 100%);
             z-index: 5;
             pointer-events: none;
             transition: all 0.5s ease;
@@ -110,7 +129,6 @@
             font-size: 12px;
             color: rgba(255, 255, 255, 0.7);
             pointer-events: none;
-            transition: all 0.5s ease;
         }
         #controls {
             position: absolute;
@@ -119,7 +137,6 @@
             z-index: 10;
             display: flex;
             gap: 10px;
-            transition: all 0.5s ease;
         }
         .control-btn {
             background-color: rgba(0, 0, 0, 0.5);
@@ -129,13 +146,6 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 14px;
-        }
-        .star {
-            position: absolute;
-            background-color: white;
-            border-radius: 50%;
-            pointer-events: none;
-            transition: opacity 0.5s ease;
         }
         #orientationInfo {
             position: absolute;
@@ -147,7 +157,6 @@
             font-size: 12px;
             color: #aaa;
             z-index: 10;
-            transition: all 0.5s ease;
         }
         #messageBox {
             position: absolute;
@@ -164,10 +173,52 @@
             text-align: center;
             max-width: 80%;
         }
+        #loadingScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 90;
+        }
+        .spinner {
+            border: 5px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 5px solid #ffffff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        .loading-text {
+            color: white;
+            font-size: 16px;
+            text-align: center;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .constellation {
+            position: absolute;
+            color: rgba(100, 150, 255, 0.6);
+            font-size: 14px;
+            pointer-events: none;
+            z-index: 3;
+            text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
+            transform-style: preserve-3d;
+            will-change: transform;
+        }
     </style>
 </head>
 <body>
     <div id="container">
+        <div id="starField"></div>
         <canvas id="skyCanvas"></canvas>
         <div id="horizon">
             <div class="horizon-label">地平線</div>
@@ -178,11 +229,10 @@
         </div>
         <div id="orientationInfo">
             <p>α: <span id="alphaValue">0</span>°, β: <span id="betaValue">0</span>°, γ: <span id="gammaValue">0</span>°</p>
-            <p>方向: <span id="orientationDirection">縦</span></p>
+            <p>視点: <span id="viewDirection">北 (0.0°)</span></p>
         </div>
         <div id="info">
             <h3>ブラックホール観測アプリ</h3>
-            <p>方向: <span id="direction">北 (0.0°)</span></p>
             <p>緯度経度: <span id="location">35.6895°, 139.6917°</span></p>
             <p>視野内のブラックホール: <span id="visibleCount">0</span></p>
             <p>操作: 画面をドラッグして視点移動</p>
@@ -202,6 +252,10 @@
             <!-- 緊急用バックアップボタン -->
             <a href="#" style="margin-top:20px;color:#AAA;font-size:12px;" onclick="forceStart();return false;">問題が発生する場合はこちらをクリック</a>
         </div>
+        <div id="loadingScreen">
+            <div class="spinner"></div>
+            <div class="loading-text">星空データを読み込み中...</div>
+        </div>
         <div id="messageBox"></div>
     </div>
 
@@ -212,9 +266,14 @@
         let alpha = 0, beta = 0, gamma = 0; // デバイスの向き
         let markers = [];
         let stars = [];
+        let constellations = [];
         let isRunning = false;
         let useSensors = true; // センサー使用フラグ
         let orientationLocked = false; // 方向ロックフラグ
+        
+        // 星空の3D表現用の変数
+        const starCount = 1000; // 生成する星の数
+        const starFieldRadius = 5000; // 星空の半径（px）
         
         // マニュアル視点制御用変数
         let manualAzimuth = 0;   // 手動方位角
@@ -227,14 +286,88 @@
         
         // 地平線の現在の位置
         let horizonPosition = 'bottom'; // 'bottom', 'top', 'left', 'right'
+        
+        // 星座データ（主要な星座の代表的な位置と名前）
+        const constellationData = [
+            { name: "オリオン座", ra: 5.5, dec: 5 },
+            { name: "しし座", ra: 10.5, dec: 15 },
+            { name: "おおぐま座", ra: 10.5, dec: 50 },
+            { name: "こぐま座", ra: 15, dec: 80 },
+            { name: "りゅう座", ra: 17, dec: 60 },
+            { name: "はくちょう座", ra: 20.5, dec: 40 },
+            { name: "カシオペア座", ra: 1, dec: 60 },
+            { name: "ペガスス座", ra: 23, dec: 20 },
+            { name: "アンドロメダ座", ra: 1, dec: 40 },
+            { name: "ケフェウス座", ra: 22, dec: 70 },
+            { name: "うお座", ra: 1, dec: 10 },
+            { name: "みずがめ座", ra: 22.5, dec: -10 },
+            { name: "やぎ座", ra: 21, dec: -20 },
+            { name: "いて座", ra: 19, dec: -25 },
+            { name: "さそり座", ra: 17, dec: -30 },
+            { name: "てんびん座", ra: 15.5, dec: -15 },
+            { name: "おとめ座", ra: 13.5, dec: 0 },
+            { name: "うみへび座", ra: 10.5, dec: -15 },
+            { name: "かに座", ra: 8.5, dec: 20 },
+            { name: "ふたご座", ra: 7, dec: 20 },
+            { name: "おうし座", ra: 5, dec: 17 },
+            { name: "ペルセウス座", ra: 3.5, dec: 40 }
+        ];
+
+        // ブラックホールのデータベース
+        const blackholes = [
+            {
+                name: "いて座A*（Sgr A*）",
+                ra: 266.4168, // 赤経 (度)
+                dec: -29.0078, // 赤緯 (度)
+                distance: "2.6万光年",
+                mass: "約400万太陽質量",
+                description: "天の川銀河の中心に位置する超大質量ブラックホール。2022年に初めて直接撮影されました。"
+            },
+            {
+                name: "M87銀河中心ブラックホール",
+                ra: 187.7059,
+                dec: 12.3911,
+                distance: "5,500万光年",
+                mass: "約65億太陽質量",
+                description: "おとめ座銀河団のM87銀河の中心に位置する超大質量ブラックホール。2019年にイベント・ホライズン・テレスコープによって史上初めて撮影されました。"
+            },
+            {
+                name: "シグナス X-1",
+                ra: 299.5903,
+                dec: 35.2016,
+                distance: "約6,000光年",
+                mass: "約15太陽質量",
+                description: "はくちょう座に位置する恒星質量ブラックホール。X線連星系で、伴星からの物質を降着しています。"
+            },
+            {
+                name: "GW150914",
+                ra: 129.1,
+                dec: -70.3,
+                distance: "約13億光年",
+                mass: "合体前: 36太陽質量と29太陽質量、合体後: 62太陽質量",
+                description: "2015年に重力波で初めて検出されたブラックホール連星の合体イベント。"
+            },
+            {
+                name: "Swift J1644+57",
+                ra: 251.2059,
+                dec: 57.5853,
+                distance: "約38億光年",
+                mass: "推定数百万太陽質量",
+                description: "潮汐破壊現象が観測された超大質量ブラックホール。星が近づきすぎて破壊されるイベントが観測されました。"
+            }
+        ];
 
         // ★★ 最も重要な関数: オーバーレイを非表示にする ★★
         function hideOverlay() {
             console.log("hideOverlay関数が呼び出されました");
+            // ロード画面を表示
+            document.getElementById('loadingScreen').style.display = 'flex';
             // 直接スタイルで非表示に
             document.getElementById('permissionOverlay').style.display = 'none';
             // アプリを初期化
-            initializeApp();
+            setTimeout(function() {
+                initializeApp();
+            }, 500);
         }
 
         // ★★ 緊急用の強制スタート関数 ★★
@@ -245,7 +378,7 @@
             // 最小限の機能だけ初期化
             createSimpleBlackholeMarkers();
             isRunning = true;
-            alert('緊急モードで起動しました。機能は制限されています。');
+            showMessage('緊急モードで起動しました。機能は制限されています。', 3000);
         }
 
         // メッセージを表示
@@ -272,8 +405,11 @@
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
                 
-                // 星を生成
-                generateStars();
+                // 3D星空を生成
+                generate3DStarField();
+                
+                // 星座を生成
+                generateConstellations();
                 
                 // 位置情報取得
                 if (navigator.geolocation) {
@@ -345,15 +481,257 @@
                 // 画面の向き変更イベントの設定
                 window.addEventListener('orientationchange', handleOrientationChange);
                 
+                // ロード画面を非表示
+                document.getElementById('loadingScreen').style.display = 'none';
+                
                 // 実行フラグを有効に
                 isRunning = true;
+                
+                // 定期的に視点を更新
+                setInterval(updateView, 30); // 約33fpsで更新
                 
             } catch (error) {
                 console.error('初期化エラー:', error);
                 // エラーでも最低限の表示はする
+                document.getElementById('loadingScreen').style.display = 'none';
                 createSimpleBlackholeMarkers();
                 isRunning = true;
-                alert('エラーが発生しましたが、基本機能は動作しています: ' + error.message);
+                showMessage('エラーが発生しましたが、基本機能は動作しています: ' + error.message, 5000);
+            }
+        }
+        
+        // 3D星空を生成
+        function generate3DStarField() {
+            const starField = document.getElementById('starField');
+            starField.innerHTML = ''; // 既存の星をクリア
+            stars = [];
+            
+            // 星の位置をランダムに生成（球面上にランダム分布）
+            for (let i = 0; i < starCount; i++) {
+                // 球面上の均一な乱数分布を生成
+                const theta = Math.random() * Math.PI * 2; // 0-2πの方位角
+                const phi = Math.acos(2 * Math.random() - 1); // 0-πの天頂角
+                
+                // 球面座標を直交座標に変換
+                const x = starFieldRadius * Math.sin(phi) * Math.cos(theta);
+                const y = starFieldRadius * Math.sin(phi) * Math.sin(theta);
+                const z = starFieldRadius * Math.cos(phi);
+                
+                // 星の明るさと大きさをランダムに決定
+                const brightness = Math.random();
+                const size = brightness * 2 + 1; // 明るい星ほど大きく
+                
+                // 星の要素を作成
+                const star = document.createElement('div');
+                star.className = 'star';
+                star.style.width = size + 'px';
+                star.style.height = size + 'px';
+                star.style.opacity = brightness * 0.7 + 0.3; // 明るさを透明度に反映
+                
+                // スクリーン座標を仮設定（実際の位置は更新時に計算）
+                star.style.left = '50%';
+                star.style.top = '50%';
+                
+                // 星空コンテナに追加
+                starField.appendChild(star);
+                
+                // 星のデータを記録
+                stars.push({
+                    element: star,
+                    x: x,
+                    y: y,
+                    z: z,
+                    size: size,
+                    brightness: brightness
+                });
+            }
+            
+            console.log(`3D星空を生成しました: ${stars.length}個の星`);
+        }
+        
+        // 星座を生成
+        function generateConstellations() {
+            const starField = document.getElementById('starField');
+            
+            // 既存の星座をクリア
+            constellations.forEach(constellation => {
+                if (constellation.element && constellation.element.parentNode) {
+                    constellation.element.parentNode.removeChild(constellation.element);
+                }
+            });
+            constellations = [];
+            
+            // 星座データから3D位置に変換
+            constellationData.forEach(constellation => {
+                // 赤経・赤緯から3D座標に変換
+                const ra = constellation.ra * 15; // 時間から度に変換
+                const dec = constellation.dec;
+                
+                // 赤経・赤緯を直交座標に変換
+                const phi = (90 - dec) * Math.PI / 180; // 天頂角（北極が0）
+                const theta = ra * Math.PI / 180; // 方位角
+                
+                const x = starFieldRadius * Math.sin(phi) * Math.cos(theta);
+                const y = starFieldRadius * Math.sin(phi) * Math.sin(theta);
+                const z = starFieldRadius * Math.cos(phi);
+                
+                // 星座名の要素を作成
+                const element = document.createElement('div');
+                element.className = 'constellation';
+                element.textContent = constellation.name;
+                element.style.left = '50%';
+                element.style.top = '50%';
+                
+                // 星空コンテナに追加
+                starField.appendChild(element);
+                
+                // 星座データを記録
+                constellations.push({
+                    element: element,
+                    name: constellation.name,
+                    x: x,
+                    y: y,
+                    z: z,
+                    ra: ra,
+                    dec: dec
+                });
+            });
+            
+            console.log(`星座データを生成しました: ${constellations.length}個の星座`);
+        }
+        
+        // 視点の更新（デバイスの方向に応じて星空を動かす）
+        function updateView() {
+            if (!isRunning) return;
+            
+            try {
+                // 現在の方向（センサーまたは手動）
+                let viewAzimuth, viewAltitude;
+                
+                if (useSensors && !orientationLocked) {
+                    // センサーからの値を使用
+                    viewAzimuth = alpha;
+                    viewAltitude = beta;
+                } else {
+                    // 手動設定値を使用
+                    viewAzimuth = manualAzimuth;
+                    viewAltitude = manualAltitude;
+                }
+                
+                // アルファ（方位角）をラジアンに変換
+                const alphaRad = viewAzimuth * Math.PI / 180;
+                // ベータ（仰角）をラジアンに変換
+                const betaRad = viewAltitude * Math.PI / 180;
+                // ガンマ（回転）をラジアンに変換
+                const gammaRad = gamma * Math.PI / 180;
+                
+                // 回転行列を作成（オイラー角からの変換）
+                const sinAlpha = Math.sin(alphaRad);
+                const cosAlpha = Math.cos(alphaRad);
+                const sinBeta = Math.sin(betaRad);
+                const cosBeta = Math.cos(betaRad);
+                const sinGamma = Math.sin(gammaRad);
+                const cosGamma = Math.cos(gammaRad);
+                
+                // 各星の位置を更新
+                stars.forEach(star => {
+                    // 視点からの相対位置を計算
+                    const viewX = -star.x;
+                    const viewY = -star.y;
+                    const viewZ = -star.z;
+                    
+                    // デバイスの向きに基づいて回転
+                    // 方位角（アルファ）による回転（Y軸周り）
+                    const rotX1 = viewX * cosAlpha - viewZ * sinAlpha;
+                    const rotY1 = viewY;
+                    const rotZ1 = viewX * sinAlpha + viewZ * cosAlpha;
+                    
+                    // 仰角（ベータ）による回転（X軸周り）
+                    const rotX2 = rotX1;
+                    const rotY2 = rotY1 * cosBeta - rotZ1 * sinBeta;
+                    const rotZ2 = rotY1 * sinBeta + rotZ1 * cosBeta;
+                    
+                    // 回転（ガンマ）による回転（Z軸周り）
+                    const rotX3 = rotX2 * cosGamma - rotY2 * sinGamma;
+                    const rotY3 = rotX2 * sinGamma + rotY2 * cosGamma;
+                    const rotZ3 = rotZ2;
+                    
+                    // パースペクティブ投影（Z座標が大きいほど小さく表示）
+                    const perspective = 1000; // パースペクティブの強さ
+                    const scale = perspective / (perspective + rotZ3);
+                    
+                    // スクリーン上の座標を計算
+                    const screenX = rotX3 * scale + window.innerWidth / 2;
+                    const screenY = rotY3 * scale + window.innerHeight / 2;
+                    
+                    // 星の要素を移動（transformを使用して高速化）
+                    star.element.style.transform = `translate(${screenX}px, ${screenY}px)`;
+                    
+                    // 星の明るさと大きさを距離に応じて調整
+                    const distance = Math.sqrt(rotX3*rotX3 + rotY3*rotY3 + rotZ3*rotZ3);
+                    const distanceScale = Math.min(1, starFieldRadius / distance);
+                    
+                    // スケールが小さすぎる場合は星を非表示にする
+                    if (scale < 0.1 || rotZ3 > 0) {
+                        star.element.style.display = 'none';
+                    } else {
+                        star.element.style.display = 'block';
+                        star.element.style.opacity = star.brightness * scale;
+                        star.element.style.width = star.size * scale + 'px';
+                        star.element.style.height = star.size * scale + 'px';
+                    }
+                });
+                
+                // 星座ラベルの位置も同様に更新
+                constellations.forEach(constellation => {
+                    // 視点からの相対位置を計算
+                    const viewX = -constellation.x;
+                    const viewY = -constellation.y;
+                    const viewZ = -constellation.z;
+                    
+                    // デバイスの向きに基づいて回転
+                    // 方位角（アルファ）による回転（Y軸周り）
+                    const rotX1 = viewX * cosAlpha - viewZ * sinAlpha;
+                    const rotY1 = viewY;
+                    const rotZ1 = viewX * sinAlpha + viewZ * cosAlpha;
+                    
+                    // 仰角（ベータ）による回転（X軸周り）
+                    const rotX2 = rotX1;
+                    const rotY2 = rotY1 * cosBeta - rotZ1 * sinBeta;
+                    const rotZ2 = rotY1 * sinBeta + rotZ1 * cosBeta;
+                    
+                    // 回転（ガンマ）による回転（Z軸周り）
+                    const rotX3 = rotX2 * cosGamma - rotY2 * sinGamma;
+                    const rotY3 = rotX2 * sinGamma + rotY2 * cosGamma;
+                    const rotZ3 = rotZ2;
+                    
+                    // パースペクティブ投影
+                    const perspective = 1000;
+                    const scale = perspective / (perspective + rotZ3);
+                    
+                    // スクリーン上の座標を計算
+                    const screenX = rotX3 * scale + window.innerWidth / 2;
+                    const screenY = rotY3 * scale + window.innerHeight / 2;
+                    
+                    // 星座ラベルを移動
+                    constellation.element.style.transform = `translate(${screenX}px, ${screenY}px)`;
+                    
+                    // 視界の外または後ろにある星座は非表示に
+                    if (scale < 0.1 || rotZ3 > 0 || 
+                        screenX < 0 || screenX > window.innerWidth || 
+                        screenY < 0 || screenY > window.innerHeight) {
+                        constellation.element.style.display = 'none';
+                    } else {
+                        constellation.element.style.display = 'block';
+                        constellation.element.style.opacity = scale * 0.7;
+                    }
+                });
+                
+                // 方向表示を更新
+                updateDirection(viewAzimuth);
+                
+            } catch (error) {
+                console.warn('視点更新エラー:', error);
             }
         }
         
@@ -362,7 +740,6 @@
             if (orientationLocked) return; // 方向がロックされている場合は何もしない
             
             updateHorizonPosition();
-            generateStars();
             updateBlackholeMarkers();
         }
         
@@ -370,15 +747,10 @@
         function updateHorizonPosition() {
             const horizon = document.getElementById('horizon');
             const horizonLabel = horizon.querySelector('.horizon-label');
-            const info = document.getElementById('info');
-            const controls = document.getElementById('controls');
-            const orientationInfo = document.getElementById('orientationInfo');
             
             // ベータとガンマの値に基づいて地平線の位置を決定
             if (Math.abs(gamma) > Math.abs(beta)) {
                 // 横向きの場合
-                document.getElementById('orientationDirection').textContent = '横';
-                
                 if (gamma > 0) {
                     // 右側が下
                     horizonPosition = 'right';
@@ -388,28 +760,12 @@
                     horizon.style.left = 'auto';
                     horizon.style.right = '0';
                     horizon.style.bottom = 'auto';
-                    horizon.style.background = 'linear-gradient(270deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%)';
+                    horizon.style.background = 'linear-gradient(270deg, rgba(0,40,0,0.8) 0%, rgba(0,0,0,0) 100%)';
                     
                     // 地平線ラベルを調整
                     horizonLabel.style.bottom = '50%';
                     horizonLabel.style.transform = 'rotate(90deg) translateY(-10px)';
                     horizonLabel.style.transformOrigin = 'right center';
-                    
-                    // 情報パネルを調整
-                    info.style.bottom = 'auto';
-                    info.style.top = '20px';
-                    info.style.left = '20px';
-                    
-                    // コントロールを調整
-                    controls.style.top = '20px';
-                    controls.style.left = 'auto';
-                    controls.style.right = '80px';
-                    
-                    // 方向情報を調整
-                    orientationInfo.style.top = '60px';
-                    orientationInfo.style.left = 'auto';
-                    orientationInfo.style.right = '20px';
-                    
                 } else {
                     // 左側が下
                     horizonPosition = 'left';
@@ -419,30 +775,15 @@
                     horizon.style.left = '0';
                     horizon.style.right = 'auto';
                     horizon.style.bottom = 'auto';
-                    horizon.style.background = 'linear-gradient(90deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%)';
+                    horizon.style.background = 'linear-gradient(90deg, rgba(0,40,0,0.8) 0%, rgba(0,0,0,0) 100%)';
                     
                     // 地平線ラベルを調整
                     horizonLabel.style.bottom = '50%';
                     horizonLabel.style.transform = 'rotate(-90deg) translateY(-10px)';
                     horizonLabel.style.transformOrigin = 'left center';
-                    
-                    // 情報パネルを調整
-                    info.style.bottom = 'auto';
-                    info.style.top = '20px';
-                    info.style.left = '80px';
-                    
-                    // コントロールを調整
-                    controls.style.top = '20px';
-                    controls.style.left = '20px';
-                    
-                    // 方向情報を調整
-                    orientationInfo.style.top = '60px';
-                    orientationInfo.style.left = '20px';
                 }
             } else {
                 // 縦向きの場合
-                document.getElementById('orientationDirection').textContent = '縦';
-                
                 if (beta > 0) {
                     // 下側が下
                     horizonPosition = 'bottom';
@@ -452,25 +793,11 @@
                     horizon.style.left = '0';
                     horizon.style.right = 'auto';
                     horizon.style.bottom = '0';
-                    horizon.style.background = 'linear-gradient(0deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%)';
+                    horizon.style.background = 'linear-gradient(0deg, rgba(0,40,0,0.8) 0%, rgba(0,0,0,0) 100%)';
                     
                     // 地平線ラベルを調整
                     horizonLabel.style.bottom = '5px';
                     horizonLabel.style.transform = 'none';
-                    
-                    // 情報パネルを調整
-                    info.style.bottom = '20px';
-                    info.style.top = 'auto';
-                    info.style.left = '20px';
-                    
-                    // コントロールを調整
-                    controls.style.top = '20px';
-                    controls.style.left = '20px';
-                    
-                    // 方向情報を調整
-                    orientationInfo.style.top = '60px';
-                    orientationInfo.style.left = '20px';
-                    
                 } else {
                     // 上側が下
                     horizonPosition = 'top';
@@ -480,66 +807,13 @@
                     horizon.style.left = '0';
                     horizon.style.right = 'auto';
                     horizon.style.bottom = 'auto';
-                    horizon.style.background = 'linear-gradient(180deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%)';
+                    horizon.style.background = 'linear-gradient(180deg, rgba(0,40,0,0.8) 0%, rgba(0,0,0,0) 100%)';
                     
                     // 地平線ラベルを調整
                     horizonLabel.style.bottom = 'auto';
                     horizonLabel.style.top = '5px';
                     horizonLabel.style.transform = 'none';
-                    
-                    // 情報パネルを調整
-                    info.style.bottom = '20px';
-                    info.style.top = 'auto';
-                    info.style.left = '20px';
-                    
-                    // コントロールを調整
-                    controls.style.top = 'auto';
-                    controls.style.bottom = '80px';
-                    controls.style.left = '20px';
-                    
-                    // 方向情報を調整
-                    orientationInfo.style.top = 'auto';
-                    orientationInfo.style.bottom = '140px';
-                    orientationInfo.style.left = '20px';
                 }
-            }
-        }
-        
-        // 星を生成
-        function generateStars() {
-            // 既存の星を削除
-            stars.forEach(star => {
-                if (star.element && star.element.parentNode) {
-                    star.element.parentNode.removeChild(star.element);
-                }
-            });
-            stars = [];
-            
-            // 新しい星を生成
-            const container = document.getElementById('container');
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-            
-            for (let i = 0; i < 100; i++) {
-                const star = document.createElement('div');
-                star.className = 'star';
-                
-                const size = Math.random() * 2 + 1;
-                const opacity = Math.random() * 0.5 + 0.5;
-                
-                star.style.width = size + 'px';
-                star.style.height = size + 'px';
-                star.style.left = Math.random() * width + 'px';
-                star.style.top = Math.random() * height + 'px';
-                star.style.opacity = opacity;
-                
-                container.appendChild(star);
-                
-                stars.push({
-                    element: star,
-                    x: parseFloat(star.style.left),
-                    y: parseFloat(star.style.top)
-                });
             }
         }
         
@@ -550,25 +824,19 @@
                 canvas.height = window.innerHeight;
             }
             
-            generateStars();
+            // 3D星空や星座の位置を更新
+            updateView();
             
             if (isRunning) {
                 updateBlackholeMarkers();
             }
         }
         
-        // ブラックホールマーカーを更新
-        function updateBlackholeMarkers() {
-            // 既存のマーカーを削除
-            markers.forEach(marker => {
-                if (marker.element && marker.element.parentNode) {
-                    marker.element.parentNode.removeChild(marker.element);
-                }
-            });
-            markers = [];
-            
-            // 新しいマーカーを作成
-            createBlackholeMarkers();
+        // 方角表示の更新
+        function updateDirection(heading) {
+            const directions = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"];
+            const index = Math.round(heading / 45) % 8;
+            document.getElementById('viewDirection').textContent = `${directions[index]} (${heading.toFixed(1)}°)`;
         }
         
         // シンプルなブラックホール表示（緊急時用）
@@ -585,56 +853,126 @@
             document.getElementById('visibleCount').textContent = blackholes.length;
         }
         
+        // ブラックホールマーカーを更新
+        function updateBlackholeMarkers() {
+            // 既存のマーカーを削除
+            markers.forEach(marker => {
+                if (marker.element && marker.element.parentNode) {
+                    marker.element.parentNode.removeChild(marker.element);
+                }
+            });
+            markers = [];
+            
+            // 新しいマーカーを作成
+            createBlackholeMarkers();
+        }
+        
         // 通常のブラックホールマーカー作成
         function createBlackholeMarkers() {
-            // 地平線の位置に応じてブラックホールを配置
+            // 赤経・赤緯からスクリーン座標に変換してブラックホールを配置
             blackholes.forEach((blackhole, index) => {
-                let x, y;
+                // 赤経・赤緯を角度に変換
+                const ra = blackhole.ra; // 度単位
+                const dec = blackhole.dec; // 度単位
                 
-                switch(horizonPosition) {
-                    case 'bottom':
-                        // 下が地平線の場合は上側に配置
-                        x = Math.random() * window.innerWidth;
-                        y = Math.random() * window.innerHeight * 0.7; // 上部70%に配置
-                        break;
-                    case 'top':
-                        // 上が地平線の場合は下側に配置
-                        x = Math.random() * window.innerWidth;
-                        y = window.innerHeight * 0.3 + Math.random() * window.innerHeight * 0.7; // 下部70%に配置
-                        break;
-                    case 'left':
-                        // 左が地平線の場合は右側に配置
-                        x = window.innerWidth * 0.3 + Math.random() * window.innerWidth * 0.7; // 右部70%に配置
-                        y = Math.random() * window.innerHeight;
-                        break;
-                    case 'right':
-                        // 右が地平線の場合は左側に配置
-                        x = Math.random() * window.innerWidth * 0.7; // 左部70%に配置
-                        y = Math.random() * window.innerHeight;
-                        break;
-                    default:
-                        // デフォルトは画面全体にランダム配置
-                        x = Math.random() * window.innerWidth;
-                        y = Math.random() * window.innerHeight;
+                // 赤経・赤緯を3D座標に変換
+                const phi = (90 - dec) * Math.PI / 180; // 天頂角（北極が0）
+                const theta = ra * Math.PI / 180; // 方位角
+                
+                const x = starFieldRadius * Math.sin(phi) * Math.cos(theta);
+                const y = starFieldRadius * Math.sin(phi) * Math.sin(theta);
+                const z = starFieldRadius * Math.cos(phi);
+                
+                // 現在の視点に基づいて回転と投影
+                const alphaRad = (useSensors && !orientationLocked ? alpha : manualAzimuth) * Math.PI / 180;
+                const betaRad = (useSensors && !orientationLocked ? beta : manualAltitude) * Math.PI / 180;
+                const gammaRad = gamma * Math.PI / 180;
+                
+                // 回転行列の計算
+                const sinAlpha = Math.sin(alphaRad);
+                const cosAlpha = Math.cos(alphaRad);
+                const sinBeta = Math.sin(betaRad);
+                const cosBeta = Math.cos(betaRad);
+                const sinGamma = Math.sin(gammaRad);
+                const cosGamma = Math.cos(gammaRad);
+                
+                // 視点からの相対位置
+                const viewX = -x;
+                const viewY = -y;
+                const viewZ = -z;
+                
+                // 方位角（アルファ）による回転
+                const rotX1 = viewX * cosAlpha - viewZ * sinAlpha;
+                const rotY1 = viewY;
+                const rotZ1 = viewX * sinAlpha + viewZ * cosAlpha;
+                
+                // 仰角（ベータ）による回転
+                const rotX2 = rotX1;
+                const rotY2 = rotY1 * cosBeta - rotZ1 * sinBeta;
+                const rotZ2 = rotY1 * sinBeta + rotZ1 * cosBeta;
+                
+                // 回転（ガンマ）による回転
+                const rotX3 = rotX2 * cosGamma - rotY2 * sinGamma;
+                const rotY3 = rotX2 * sinGamma + rotY2 * cosGamma;
+                const rotZ3 = rotZ2;
+                
+                // パースペクティブ投影
+                const perspective = 1000;
+                const scale = perspective / (perspective + rotZ3);
+                
+                // スクリーン上の座標
+                const screenX = rotX3 * scale + window.innerWidth / 2;
+                const screenY = rotY3 * scale + window.innerHeight / 2;
+                
+                // 視界内にある場合のみマーカーを作成
+                if (scale > 0.1 && rotZ3 < 0 && 
+                    screenX >= 0 && screenX <= window.innerWidth && 
+                    screenY >= 0 && screenY <= window.innerHeight) {
+                    
+                    // 地平線に対する位置を判定
+                    let isAboveHorizon = true;
+                    if (horizonPosition === 'bottom' && screenY > window.innerHeight * 0.8) {
+                        isAboveHorizon = false;
+                    } else if (horizonPosition === 'top' && screenY < window.innerHeight * 0.2) {
+                        isAboveHorizon = false;
+                    } else if (horizonPosition === 'left' && screenX < window.innerWidth * 0.2) {
+                        isAboveHorizon = false;
+                    } else if (horizonPosition === 'right' && screenX > window.innerWidth * 0.8) {
+                        isAboveHorizon = false;
+                    }
+                    
+                    createBlackholeMarker(blackhole, screenX, screenY, isAboveHorizon, scale);
                 }
-                
-                createBlackholeMarker(blackhole, x, y);
             });
             
             // 視野内のブラックホール数を更新
-            document.getElementById('visibleCount').textContent = blackholes.length;
+            document.getElementById('visibleCount').textContent = markers.length;
         }
         
         // ブラックホールマーカーを作成
-        function createBlackholeMarker(blackhole, x, y) {
+        function createBlackholeMarker(blackhole, x, y, isAboveHorizon, scale) {
             const marker = document.createElement('div');
             marker.className = 'blackhole-marker';
             marker.style.left = `${x}px`;
             marker.style.top = `${y}px`;
             
+            // 地平線以下の場合は薄く表示
+            if (!isAboveHorizon) {
+                marker.style.opacity = '0.5';
+                marker.style.border = '1px solid rgba(255, 0, 0, 0.8)';
+                marker.style.backgroundColor = 'rgba(100, 0, 0, 0.5)';
+            }
+            
+            // スケールに応じてサイズを調整
+            if (scale) {
+                const size = 30 * Math.min(1, scale * 1.5);
+                marker.style.width = `${size}px`;
+                marker.style.height = `${size}px`;
+            }
+            
             // クリックイベント
             marker.addEventListener('click', function() {
-                showBlackholeInfo(blackhole);
+                showBlackholeInfo(blackhole, isAboveHorizon);
             });
             
             document.getElementById('container').appendChild(marker);
@@ -642,18 +980,25 @@
             // マーカーを記録
             markers.push({
                 element: marker,
-                blackhole: blackhole
+                blackhole: blackhole,
+                isAboveHorizon: isAboveHorizon
             });
         }
         
         // ブラックホール情報を表示
-        function showBlackholeInfo(blackhole) {
+        function showBlackholeInfo(blackhole, isAboveHorizon) {
             const infoPanel = document.getElementById('objectInfo');
             
             document.getElementById('objectName').textContent = blackhole.name;
             document.getElementById('objectDistance').textContent = `距離: ${blackhole.distance}`;
             document.getElementById('objectMass').textContent = `質量: ${blackhole.mass}`;
             document.getElementById('objectDescription').textContent = blackhole.description;
+            
+            // 地平線以下の場合は注意を表示
+            if (!isAboveHorizon) {
+                const description = document.getElementById('objectDescription');
+                description.textContent += "\n（注意：この天体は現在地平線より下にあります）";
+            }
             
             infoPanel.style.display = 'block';
             
@@ -674,14 +1019,7 @@
             gamma = 0;
             manualAzimuth = 0;
             manualAltitude = 45;
-            updateDirectionText(0);
-        }
-        
-        // 方角テキスト更新
-        function updateDirectionText(heading) {
-            const directions = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"];
-            const index = Math.round(heading / 45) % 8;
-            document.getElementById('direction').textContent = `${directions[index]} (${heading.toFixed(1)}°)`;
+            updateDirection(0);
         }
         
         // デバイスの向きハンドラ
@@ -699,18 +1037,6 @@
                 document.getElementById('alphaValue').textContent = alpha.toFixed(1);
                 document.getElementById('betaValue').textContent = beta.toFixed(1);
                 document.getElementById('gammaValue').textContent = gamma.toFixed(1);
-                
-                // 方角を計算
-                let heading = 360 - alpha;
-                if (heading < 0) heading += 360;
-                if (heading > 360) heading -= 360;
-                
-                // マニュアル値を同期
-                manualAzimuth = heading;
-                manualAltitude = 90 - Math.abs(beta);
-                
-                // 方角を表示
-                updateDirectionText(heading);
                 
                 // 方向がロックされていない場合は地平線位置を更新
                 if (!orientationLocked) {
@@ -778,10 +1104,6 @@
             
             touchLastX = touch.clientX;
             touchLastY = touch.clientY;
-            
-            // 表示を更新
-            updateDirectionText(manualAzimuth);
-            updateBlackholeMarkers();
         }
         
         // タッチ終了
@@ -826,10 +1148,6 @@
             
             touchLastX = event.clientX;
             touchLastY = event.clientY;
-            
-            // 表示を更新
-            updateDirectionText(manualAzimuth);
-            updateBlackholeMarkers();
         }
         
         // マウスアップ
