@@ -36,6 +36,7 @@
             border-radius: 10px;
             max-width: 80%;
             z-index: 10;
+            transition: all 0.5s ease;
         }
         #objectInfo {
             position: absolute;
@@ -88,6 +89,7 @@
             transform: translate(-50%, -50%);
             cursor: pointer;
             z-index: 10;
+            transition: all 0.3s ease;
         }
         #horizon {
             position: absolute;
@@ -98,6 +100,7 @@
             background: linear-gradient(0deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%);
             z-index: 5;
             pointer-events: none;
+            transition: all 0.5s ease;
         }
         .horizon-label {
             position: absolute;
@@ -107,6 +110,7 @@
             font-size: 12px;
             color: rgba(255, 255, 255, 0.7);
             pointer-events: none;
+            transition: all 0.5s ease;
         }
         #controls {
             position: absolute;
@@ -115,6 +119,7 @@
             z-index: 10;
             display: flex;
             gap: 10px;
+            transition: all 0.5s ease;
         }
         .control-btn {
             background-color: rgba(0, 0, 0, 0.5);
@@ -124,6 +129,40 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 14px;
+        }
+        .star {
+            position: absolute;
+            background-color: white;
+            border-radius: 50%;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+        #orientationInfo {
+            position: absolute;
+            top: 60px;
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            color: #aaa;
+            z-index: 10;
+            transition: all 0.5s ease;
+        }
+        #messageBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            border: 1px solid #444;
+            border-radius: 10px;
+            padding: 20px;
+            color: white;
+            display: none;
+            z-index: 200;
+            text-align: center;
+            max-width: 80%;
         }
     </style>
 </head>
@@ -136,6 +175,10 @@
         <div id="controls">
             <button class="control-btn" id="resetViewBtn">視点リセット</button>
             <button class="control-btn" id="toggleSensorsBtn">センサー切替</button>
+        </div>
+        <div id="orientationInfo">
+            <p>α: <span id="alphaValue">0</span>°, β: <span id="betaValue">0</span>°, γ: <span id="gammaValue">0</span>°</p>
+            <p>方向: <span id="orientationDirection">縦</span></p>
         </div>
         <div id="info">
             <h3>ブラックホール観測アプリ</h3>
@@ -159,66 +202,38 @@
             <!-- 緊急用バックアップボタン -->
             <a href="#" style="margin-top:20px;color:#AAA;font-size:12px;" onclick="forceStart();return false;">問題が発生する場合はこちらをクリック</a>
         </div>
+        <div id="messageBox"></div>
     </div>
 
     <script>
         // グローバル変数
         let canvas, ctx;
         let latitude = 35.6895, longitude = 139.6917; // デフォルト位置（東京）
-        let alpha = 0, beta = 45, gamma = 0; // デフォルトの向き
+        let alpha = 0, beta = 0, gamma = 0; // デバイスの向き
         let markers = [];
+        let stars = [];
         let isRunning = false;
+        let useSensors = true; // センサー使用フラグ
+        let orientationLocked = false; // 方向ロックフラグ
         
-        // ブラックホールのデータベース
-        const blackholes = [
-            {
-                name: "いて座A*（Sgr A*）",
-                ra: 266.4168, // 赤経 (度)
-                dec: -29.0078, // 赤緯 (度)
-                distance: "2.6万光年",
-                mass: "約400万太陽質量",
-                description: "天の川銀河の中心に位置する超大質量ブラックホール。2022年に初めて直接撮影されました。"
-            },
-            {
-                name: "M87銀河中心ブラックホール",
-                ra: 187.7059,
-                dec: 12.3911,
-                distance: "5,500万光年",
-                mass: "約65億太陽質量",
-                description: "おとめ座銀河団のM87銀河の中心に位置する超大質量ブラックホール。2019年にイベント・ホライズン・テレスコープによって史上初めて撮影されました。"
-            },
-            {
-                name: "シグナス X-1",
-                ra: 299.5903,
-                dec: 35.2016,
-                distance: "約6,000光年",
-                mass: "約15太陽質量",
-                description: "はくちょう座に位置する恒星質量ブラックホール。X線連星系で、伴星からの物質を降着しています。"
-            },
-            {
-                name: "GW150914",
-                ra: 129.1,
-                dec: -70.3,
-                distance: "約13億光年",
-                mass: "合体前: 36太陽質量と29太陽質量、合体後: 62太陽質量",
-                description: "2015年に重力波で初めて検出されたブラックホール連星の合体イベント。"
-            },
-            {
-                name: "Swift J1644+57",
-                ra: 251.2059,
-                dec: 57.5853,
-                distance: "約38億光年",
-                mass: "推定数百万太陽質量",
-                description: "潮汐破壊現象が観測された超大質量ブラックホール。星が近づきすぎて破壊されるイベントが観測されました。"
-            }
-        ];
+        // マニュアル視点制御用変数
+        let manualAzimuth = 0;   // 手動方位角
+        let manualAltitude = 45; // 手動高度
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchLastX = 0;
+        let touchLastY = 0;
+        let isDragging = false;
+        
+        // 地平線の現在の位置
+        let horizonPosition = 'bottom'; // 'bottom', 'top', 'left', 'right'
 
         // ★★ 最も重要な関数: オーバーレイを非表示にする ★★
         function hideOverlay() {
             console.log("hideOverlay関数が呼び出されました");
             // 直接スタイルで非表示に
             document.getElementById('permissionOverlay').style.display = 'none';
-            // 初期化を開始
+            // アプリを初期化
             initializeApp();
         }
 
@@ -230,6 +245,18 @@
             // 最小限の機能だけ初期化
             createSimpleBlackholeMarkers();
             isRunning = true;
+            alert('緊急モードで起動しました。機能は制限されています。');
+        }
+
+        // メッセージを表示
+        function showMessage(message, duration) {
+            const messageBox = document.getElementById('messageBox');
+            messageBox.textContent = message;
+            messageBox.style.display = 'block';
+            
+            setTimeout(function() {
+                messageBox.style.display = 'none';
+            }, duration);
         }
 
         // アプリの初期化処理
@@ -245,31 +272,303 @@
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
                 
+                // 星を生成
+                generateStars();
+                
+                // 位置情報取得
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            latitude = position.coords.latitude;
+                            longitude = position.coords.longitude;
+                            const locationElement = document.getElementById('location');
+                            if (locationElement) {
+                                locationElement.textContent = `${latitude.toFixed(4)}°, ${longitude.toFixed(4)}°`;
+                            }
+                            updateBlackholeMarkers();
+                        },
+                        function(error) {
+                            // エラーは無視してデフォルト値を使用
+                            console.warn('位置情報エラー:', error);
+                            showMessage("位置情報が取得できませんでした。デフォルト位置（東京）を使用します。", 3000);
+                        },
+                        {
+                            enableHighAccuracy: false,
+                            timeout: 5000,
+                            maximumAge: 60000
+                        }
+                    );
+                }
+                
+                // デバイスの向きセンサー設定
+                if (window.DeviceOrientationEvent) {
+                    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                        // iOS
+                        DeviceOrientationEvent.requestPermission()
+                            .then(function(permission) {
+                                if (permission === 'granted') {
+                                    window.addEventListener('deviceorientation', handleOrientation);
+                                    useSensors = true;
+                                    document.getElementById('toggleSensorsBtn').textContent = 'センサーOFF';
+                                } else {
+                                    useFallbackOrientation();
+                                }
+                            })
+                            .catch(function(error) {
+                                useFallbackOrientation();
+                                showMessage("センサーが利用できないため、手動操作モードになります。", 3000);
+                            });
+                    } else {
+                        // Android など
+                        window.addEventListener('deviceorientation', handleOrientation);
+                        useSensors = true;
+                        document.getElementById('toggleSensorsBtn').textContent = 'センサーOFF';
+                    }
+                } else {
+                    useFallbackOrientation();
+                    showMessage("このデバイスはセンサーをサポートしていません。手動操作モードになります。", 3000);
+                }
+                
                 // コントロールボタンのイベント設定
                 document.getElementById('resetViewBtn').addEventListener('click', resetView);
                 document.getElementById('toggleSensorsBtn').addEventListener('click', toggleSensors);
                 
+                // タッチ/マウスイベントの設定
+                setupTouchControls();
+                
+                // リサイズイベントの設定
+                window.addEventListener('resize', handleResize);
+                
                 // ブラックホールマーカーを表示
                 createBlackholeMarkers();
                 
+                // 画面の向き変更イベントの設定
+                window.addEventListener('orientationchange', handleOrientationChange);
+                
                 // 実行フラグを有効に
                 isRunning = true;
+                
             } catch (error) {
                 console.error('初期化エラー:', error);
                 // エラーでも最低限の表示はする
                 createSimpleBlackholeMarkers();
                 isRunning = true;
+                alert('エラーが発生しましたが、基本機能は動作しています: ' + error.message);
             }
         }
         
-        // 視点リセット
-        function resetView() {
-            alert('視点をリセットしました');
+        // 画面の向き変更イベント処理
+        function handleOrientationChange() {
+            if (orientationLocked) return; // 方向がロックされている場合は何もしない
+            
+            updateHorizonPosition();
+            generateStars();
+            updateBlackholeMarkers();
         }
         
-        // センサー切替
-        function toggleSensors() {
-            alert('センサーの設定を切り替えました');
+        // 地平線の位置を更新
+        function updateHorizonPosition() {
+            const horizon = document.getElementById('horizon');
+            const horizonLabel = horizon.querySelector('.horizon-label');
+            const info = document.getElementById('info');
+            const controls = document.getElementById('controls');
+            const orientationInfo = document.getElementById('orientationInfo');
+            
+            // ベータとガンマの値に基づいて地平線の位置を決定
+            if (Math.abs(gamma) > Math.abs(beta)) {
+                // 横向きの場合
+                document.getElementById('orientationDirection').textContent = '横';
+                
+                if (gamma > 0) {
+                    // 右側が下
+                    horizonPosition = 'right';
+                    horizon.style.width = '20%';
+                    horizon.style.height = '100%';
+                    horizon.style.top = '0';
+                    horizon.style.left = 'auto';
+                    horizon.style.right = '0';
+                    horizon.style.bottom = 'auto';
+                    horizon.style.background = 'linear-gradient(270deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%)';
+                    
+                    // 地平線ラベルを調整
+                    horizonLabel.style.bottom = '50%';
+                    horizonLabel.style.transform = 'rotate(90deg) translateY(-10px)';
+                    horizonLabel.style.transformOrigin = 'right center';
+                    
+                    // 情報パネルを調整
+                    info.style.bottom = 'auto';
+                    info.style.top = '20px';
+                    info.style.left = '20px';
+                    
+                    // コントロールを調整
+                    controls.style.top = '20px';
+                    controls.style.left = 'auto';
+                    controls.style.right = '80px';
+                    
+                    // 方向情報を調整
+                    orientationInfo.style.top = '60px';
+                    orientationInfo.style.left = 'auto';
+                    orientationInfo.style.right = '20px';
+                    
+                } else {
+                    // 左側が下
+                    horizonPosition = 'left';
+                    horizon.style.width = '20%';
+                    horizon.style.height = '100%';
+                    horizon.style.top = '0';
+                    horizon.style.left = '0';
+                    horizon.style.right = 'auto';
+                    horizon.style.bottom = 'auto';
+                    horizon.style.background = 'linear-gradient(90deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%)';
+                    
+                    // 地平線ラベルを調整
+                    horizonLabel.style.bottom = '50%';
+                    horizonLabel.style.transform = 'rotate(-90deg) translateY(-10px)';
+                    horizonLabel.style.transformOrigin = 'left center';
+                    
+                    // 情報パネルを調整
+                    info.style.bottom = 'auto';
+                    info.style.top = '20px';
+                    info.style.left = '80px';
+                    
+                    // コントロールを調整
+                    controls.style.top = '20px';
+                    controls.style.left = '20px';
+                    
+                    // 方向情報を調整
+                    orientationInfo.style.top = '60px';
+                    orientationInfo.style.left = '20px';
+                }
+            } else {
+                // 縦向きの場合
+                document.getElementById('orientationDirection').textContent = '縦';
+                
+                if (beta > 0) {
+                    // 下側が下
+                    horizonPosition = 'bottom';
+                    horizon.style.width = '100%';
+                    horizon.style.height = '20%';
+                    horizon.style.top = 'auto';
+                    horizon.style.left = '0';
+                    horizon.style.right = 'auto';
+                    horizon.style.bottom = '0';
+                    horizon.style.background = 'linear-gradient(0deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%)';
+                    
+                    // 地平線ラベルを調整
+                    horizonLabel.style.bottom = '5px';
+                    horizonLabel.style.transform = 'none';
+                    
+                    // 情報パネルを調整
+                    info.style.bottom = '20px';
+                    info.style.top = 'auto';
+                    info.style.left = '20px';
+                    
+                    // コントロールを調整
+                    controls.style.top = '20px';
+                    controls.style.left = '20px';
+                    
+                    // 方向情報を調整
+                    orientationInfo.style.top = '60px';
+                    orientationInfo.style.left = '20px';
+                    
+                } else {
+                    // 上側が下
+                    horizonPosition = 'top';
+                    horizon.style.width = '100%';
+                    horizon.style.height = '20%';
+                    horizon.style.top = '0';
+                    horizon.style.left = '0';
+                    horizon.style.right = 'auto';
+                    horizon.style.bottom = 'auto';
+                    horizon.style.background = 'linear-gradient(180deg, rgba(0,20,0,0.8) 0%, rgba(0,0,0,0) 100%)';
+                    
+                    // 地平線ラベルを調整
+                    horizonLabel.style.bottom = 'auto';
+                    horizonLabel.style.top = '5px';
+                    horizonLabel.style.transform = 'none';
+                    
+                    // 情報パネルを調整
+                    info.style.bottom = '20px';
+                    info.style.top = 'auto';
+                    info.style.left = '20px';
+                    
+                    // コントロールを調整
+                    controls.style.top = 'auto';
+                    controls.style.bottom = '80px';
+                    controls.style.left = '20px';
+                    
+                    // 方向情報を調整
+                    orientationInfo.style.top = 'auto';
+                    orientationInfo.style.bottom = '140px';
+                    orientationInfo.style.left = '20px';
+                }
+            }
+        }
+        
+        // 星を生成
+        function generateStars() {
+            // 既存の星を削除
+            stars.forEach(star => {
+                if (star.element && star.element.parentNode) {
+                    star.element.parentNode.removeChild(star.element);
+                }
+            });
+            stars = [];
+            
+            // 新しい星を生成
+            const container = document.getElementById('container');
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            
+            for (let i = 0; i < 100; i++) {
+                const star = document.createElement('div');
+                star.className = 'star';
+                
+                const size = Math.random() * 2 + 1;
+                const opacity = Math.random() * 0.5 + 0.5;
+                
+                star.style.width = size + 'px';
+                star.style.height = size + 'px';
+                star.style.left = Math.random() * width + 'px';
+                star.style.top = Math.random() * height + 'px';
+                star.style.opacity = opacity;
+                
+                container.appendChild(star);
+                
+                stars.push({
+                    element: star,
+                    x: parseFloat(star.style.left),
+                    y: parseFloat(star.style.top)
+                });
+            }
+        }
+        
+        // リサイズ処理
+        function handleResize() {
+            if (canvas) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            
+            generateStars();
+            
+            if (isRunning) {
+                updateBlackholeMarkers();
+            }
+        }
+        
+        // ブラックホールマーカーを更新
+        function updateBlackholeMarkers() {
+            // 既存のマーカーを削除
+            markers.forEach(marker => {
+                if (marker.element && marker.element.parentNode) {
+                    marker.element.parentNode.removeChild(marker.element);
+                }
+            });
+            markers = [];
+            
+            // 新しいマーカーを作成
+            createBlackholeMarkers();
         }
         
         // シンプルなブラックホール表示（緊急時用）
@@ -288,10 +587,36 @@
         
         // 通常のブラックホールマーカー作成
         function createBlackholeMarkers() {
-            // ブラックホールをランダムな位置に配置
+            // 地平線の位置に応じてブラックホールを配置
             blackholes.forEach((blackhole, index) => {
-                const x = Math.random() * window.innerWidth;
-                const y = Math.random() * window.innerHeight * 0.7; // 上部70%に配置
+                let x, y;
+                
+                switch(horizonPosition) {
+                    case 'bottom':
+                        // 下が地平線の場合は上側に配置
+                        x = Math.random() * window.innerWidth;
+                        y = Math.random() * window.innerHeight * 0.7; // 上部70%に配置
+                        break;
+                    case 'top':
+                        // 上が地平線の場合は下側に配置
+                        x = Math.random() * window.innerWidth;
+                        y = window.innerHeight * 0.3 + Math.random() * window.innerHeight * 0.7; // 下部70%に配置
+                        break;
+                    case 'left':
+                        // 左が地平線の場合は右側に配置
+                        x = window.innerWidth * 0.3 + Math.random() * window.innerWidth * 0.7; // 右部70%に配置
+                        y = Math.random() * window.innerHeight;
+                        break;
+                    case 'right':
+                        // 右が地平線の場合は左側に配置
+                        x = Math.random() * window.innerWidth * 0.7; // 左部70%に配置
+                        y = Math.random() * window.innerHeight;
+                        break;
+                    default:
+                        // デフォルトは画面全体にランダム配置
+                        x = Math.random() * window.innerWidth;
+                        y = Math.random() * window.innerHeight;
+                }
                 
                 createBlackholeMarker(blackhole, x, y);
             });
@@ -337,9 +662,213 @@
                 infoPanel.style.display = 'none';
             }, 5000);
         }
-
-        // DOM読み込み完了時のイベント - ここではあえて何もしない
-        // これまでの問題はここに処理を書いても実行されなかった可能性がある
+        
+        // マニュアル方向設定（センサーが使えない場合）
+        function useFallbackOrientation() {
+            useSensors = false;
+            document.getElementById('toggleSensorsBtn').textContent = 'センサーON';
+            
+            // 固定方向に設定
+            alpha = 0; // 北向き
+            beta = 45; // 45度上向き
+            gamma = 0;
+            manualAzimuth = 0;
+            manualAltitude = 45;
+            updateDirectionText(0);
+        }
+        
+        // 方角テキスト更新
+        function updateDirectionText(heading) {
+            const directions = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"];
+            const index = Math.round(heading / 45) % 8;
+            document.getElementById('direction').textContent = `${directions[index]} (${heading.toFixed(1)}°)`;
+        }
+        
+        // デバイスの向きハンドラ
+        function handleOrientation(event) {
+            // センサーが無効化されている場合は何もしない
+            if (!useSensors) return;
+            
+            try {
+                // iOS/Androidの違いを吸収
+                alpha = event.alpha || 0; // z軸周りの回転 (0-360)
+                beta = event.beta || 0;   // x軸周りの回転 (-180-180)
+                gamma = event.gamma || 0; // y軸周りの回転 (-90-90)
+                
+                // センサー値の表示を更新
+                document.getElementById('alphaValue').textContent = alpha.toFixed(1);
+                document.getElementById('betaValue').textContent = beta.toFixed(1);
+                document.getElementById('gammaValue').textContent = gamma.toFixed(1);
+                
+                // 方角を計算
+                let heading = 360 - alpha;
+                if (heading < 0) heading += 360;
+                if (heading > 360) heading -= 360;
+                
+                // マニュアル値を同期
+                manualAzimuth = heading;
+                manualAltitude = 90 - Math.abs(beta);
+                
+                // 方角を表示
+                updateDirectionText(heading);
+                
+                // 方向がロックされていない場合は地平線位置を更新
+                if (!orientationLocked) {
+                    updateHorizonPosition();
+                }
+            } catch (error) {
+                console.warn('向き検出エラー:', error);
+                // エラー時はデフォルト値を使用
+                useSensors = false;
+                document.getElementById('toggleSensorsBtn').textContent = 'センサーON';
+            }
+        }
+        
+        // タッチ/マウス操作のセットアップ
+        function setupTouchControls() {
+            const container = document.getElementById('container');
+            
+            // タッチイベント
+            container.addEventListener('touchstart', handleTouchStart, false);
+            container.addEventListener('touchmove', handleTouchMove, false);
+            container.addEventListener('touchend', handleTouchEnd, false);
+            
+            // マウスイベント（PC用）
+            container.addEventListener('mousedown', handleMouseDown, false);
+            container.addEventListener('mousemove', handleMouseMove, false);
+            container.addEventListener('mouseup', handleMouseUp, false);
+        }
+        
+        // タッチ開始
+        function handleTouchStart(event) {
+            event.preventDefault();
+            const touch = event.touches[0];
+            touchStartX = touch.clientX;
+            touchStartY = touch.clientY;
+            touchLastX = touchStartX;
+            touchLastY = touchStartY;
+            isDragging = true;
+            
+            // ドラッグ開始時に方向をロック
+            orientationLocked = true;
+            
+            // センサーを無効化（手動操作中）
+            if (isDragging) {
+                useSensors = false;
+                document.getElementById('toggleSensorsBtn').textContent = 'センサーON';
+            }
+        }
+        
+        // タッチ移動
+        function handleTouchMove(event) {
+            if (!isDragging) return;
+            event.preventDefault();
+            
+            const touch = event.touches[0];
+            const deltaX = touch.clientX - touchLastX;
+            const deltaY = touch.clientY - touchLastY;
+            
+            // 方位角と高度を更新（横方向の動きで方位角、縦方向の動きで高度を変更）
+            manualAzimuth = (manualAzimuth - deltaX * 0.5) % 360;
+            if (manualAzimuth < 0) manualAzimuth += 360;
+            
+            manualAltitude += deltaY * 0.5;
+            // 高度の制限（-10度から90度の範囲に制限）
+            manualAltitude = Math.max(-10, Math.min(90, manualAltitude));
+            
+            touchLastX = touch.clientX;
+            touchLastY = touch.clientY;
+            
+            // 表示を更新
+            updateDirectionText(manualAzimuth);
+            updateBlackholeMarkers();
+        }
+        
+        // タッチ終了
+        function handleTouchEnd(event) {
+            isDragging = false;
+        }
+        
+        // マウスダウン
+        function handleMouseDown(event) {
+            event.preventDefault();
+            touchStartX = event.clientX;
+            touchStartY = event.clientY;
+            touchLastX = touchStartX;
+            touchLastY = touchStartY;
+            isDragging = true;
+            
+            // ドラッグ開始時に方向をロック
+            orientationLocked = true;
+            
+            // センサーを無効化（手動操作中）
+            if (isDragging) {
+                useSensors = false;
+                document.getElementById('toggleSensorsBtn').textContent = 'センサーON';
+            }
+        }
+        
+        // マウス移動
+        function handleMouseMove(event) {
+            if (!isDragging) return;
+            event.preventDefault();
+            
+            const deltaX = event.clientX - touchLastX;
+            const deltaY = event.clientY - touchLastY;
+            
+            // 方位角と高度を更新
+            manualAzimuth = (manualAzimuth - deltaX * 0.5) % 360;
+            if (manualAzimuth < 0) manualAzimuth += 360;
+            
+            manualAltitude += deltaY * 0.5;
+            // 高度の制限（-10度から90度の範囲に制限）
+            manualAltitude = Math.max(-10, Math.min(90, manualAltitude));
+            
+            touchLastX = event.clientX;
+            touchLastY = event.clientY;
+            
+            // 表示を更新
+            updateDirectionText(manualAzimuth);
+            updateBlackholeMarkers();
+        }
+        
+        // マウスアップ
+        function handleMouseUp(event) {
+            isDragging = false;
+        }
+        
+        // 視点リセット
+        function resetView() {
+            // 方向ロックを解除
+            orientationLocked = false;
+            
+            // センサーを有効化
+            useSensors = true;
+            document.getElementById('toggleSensorsBtn').textContent = 'センサーOFF';
+            
+            // 現在のセンサー値で地平線位置を更新
+            updateHorizonPosition();
+            
+            // マーカーを更新
+            updateBlackholeMarkers();
+            
+            showMessage("視点をリセットしました。スマホの方向に連動します。", 2000);
+        }
+        
+        // センサー切替
+        function toggleSensors() {
+            useSensors = !useSensors;
+            
+            if (useSensors) {
+                document.getElementById('toggleSensorsBtn').textContent = 'センサーOFF';
+                orientationLocked = false; // ロック解除
+                showMessage("センサーモードに切り替えました", 1000);
+            } else {
+                document.getElementById('toggleSensorsBtn').textContent = 'センサーON';
+                orientationLocked = true; // ロック
+                showMessage("手動操作モードに切り替えました", 1000);
+            }
+        }
     </script>
 </body>
 </html>
