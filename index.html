@@ -214,6 +214,31 @@
             transform-style: preserve-3d;
             will-change: transform;
         }
+        /* 天球グリッド用のスタイル */
+        .grid-line {
+            position: absolute;
+            background-color: rgba(100, 100, 255, 0.3);
+            pointer-events: none;
+            transform-style: preserve-3d;
+            will-change: transform;
+            z-index: 2;
+        }
+        .grid-line-ra {
+            border-top: 1px dashed rgba(100, 150, 255, 0.4);
+        }
+        .grid-line-dec {
+            border-left: 1px dashed rgba(150, 100, 255, 0.4);
+        }
+        .grid-label {
+            position: absolute;
+            color: rgba(150, 200, 255, 0.7);
+            font-size: 10px;
+            pointer-events: none;
+            z-index: 3;
+            text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+            transform-style: preserve-3d;
+            will-change: transform;
+        }
     </style>
 </head>
 <body>
@@ -286,6 +311,10 @@
         
         // 地平線の現在の位置
         let horizonPosition = 'bottom'; // 'bottom', 'top', 'left', 'right'
+        
+        // 天球グリッド用の変数
+        let gridLines = [];
+        let showGrid = true; // デフォルトでグリッド表示
         
         // 星座データ（主要な星座の代表的な位置と名前）
         const constellationData = [
@@ -481,6 +510,18 @@
                 // 画面の向き変更イベントの設定
                 window.addEventListener('orientationchange', handleOrientationChange);
                 
+                // コントロールにグリッド切替ボタンを追加
+                const controlsDiv = document.getElementById('controls');
+                const gridBtn = document.createElement('button');
+                gridBtn.className = 'control-btn';
+                gridBtn.id = 'toggleGridBtn';
+                gridBtn.textContent = 'グリッドOFF';
+                gridBtn.addEventListener('click', toggleGrid);
+                controlsDiv.appendChild(gridBtn);
+                
+                // 天球グリッドを生成
+                generateCelestialGrid();
+                
                 // ロード画面を非表示
                 document.getElementById('loadingScreen').style.display = 'none';
                 
@@ -598,6 +639,245 @@
             });
             
             console.log(`星座データを生成しました: ${constellations.length}個の星座`);
+        }
+        
+        // 天球グリッドを生成する関数
+        function generateCelestialGrid() {
+            const starField = document.getElementById('starField');
+            
+            // 既存のグリッドをクリア
+            gridLines.forEach(line => {
+                if (line.element && line.element.parentNode) {
+                    line.element.parentNode.removeChild(line.element);
+                }
+            });
+            gridLines = [];
+            
+            // グリッドを非表示設定の場合は、ここで終了
+            if (!showGrid) return;
+            
+            // 赤経線（経度線に相当）- 15度ごとに作成（1時間ごと）
+            for (let ra = 0; ra < 360; ra += 15) {
+                // 赤経線の点を計算
+                const points = [];
+                for (let dec = -80; dec <= 80; dec += 5) {
+                    // 赤経・赤緯を直交座標に変換
+                    const phi = (90 - dec) * Math.PI / 180; // 天頂角（北極が0）
+                    const theta = ra * Math.PI / 180; // 方位角
+                    
+                    const x = starFieldRadius * Math.sin(phi) * Math.cos(theta);
+                    const y = starFieldRadius * Math.sin(phi) * Math.sin(theta);
+                    const z = starFieldRadius * Math.cos(phi);
+                    
+                    points.push({ x, y, z });
+                }
+                
+                // 線分を作成
+                for (let i = 0; i < points.length - 1; i++) {
+                    const lineElement = document.createElement('div');
+                    lineElement.className = 'grid-line grid-line-ra';
+                    lineElement.style.left = '50%';
+                    lineElement.style.top = '50%';
+                    
+                    // 線の長さと角度は動的に計算される
+                    starField.appendChild(lineElement);
+                    
+                    // グリッドデータを記録
+                    gridLines.push({
+                        element: lineElement,
+                        startPoint: points[i],
+                        endPoint: points[i + 1],
+                        type: 'ra'
+                    });
+                }
+                
+                // 赤経ラベルを追加（北と南に）
+                if (ra % 30 === 0) { // 2時間ごとにラベル表示
+                    const hours = ra / 15;
+                    
+                    // 北側ラベル（赤緯+45度位置）
+                    const northLabelElement = document.createElement('div');
+                    northLabelElement.className = 'grid-label';
+                    northLabelElement.textContent = `${hours}h`;
+                    
+                    const northPhi = (90 - 45) * Math.PI / 180;
+                    const northTheta = ra * Math.PI / 180;
+                    
+                    const northX = starFieldRadius * Math.sin(northPhi) * Math.cos(northTheta);
+                    const northY = starFieldRadius * Math.sin(northPhi) * Math.sin(northTheta);
+                    const northZ = starFieldRadius * Math.cos(northPhi);
+                    
+                    starField.appendChild(northLabelElement);
+                    
+                    gridLines.push({
+                        element: northLabelElement,
+                        x: northX,
+                        y: northY,
+                        z: northZ,
+                        type: 'label'
+                    });
+                    
+                    // 南側ラベル（赤緯-45度位置）
+                    const southLabelElement = document.createElement('div');
+                    southLabelElement.className = 'grid-label';
+                    southLabelElement.textContent = `${hours}h`;
+                    
+                    const southPhi = (90 - (-45)) * Math.PI / 180;
+                    const southTheta = ra * Math.PI / 180;
+                    
+                    const southX = starFieldRadius * Math.sin(southPhi) * Math.cos(southTheta);
+                    const southY = starFieldRadius * Math.sin(southPhi) * Math.sin(southTheta);
+                    const southZ = starFieldRadius * Math.cos(southPhi);
+                    
+                    starField.appendChild(southLabelElement);
+                    
+                    gridLines.push({
+                        element: southLabelElement,
+                        x: southX,
+                        y: southY,
+                        z: southZ,
+                        type: 'label'
+                    });
+                }
+            }
+            
+            // 赤緯線（緯度線に相当）- 15度ごとに作成
+            for (let dec = -75; dec <= 75; dec += 15) {
+                if (dec === 0) continue; // 天の赤道は特別に処理する
+                
+                const points = [];
+                // 赤経を15度ごとにサンプリング
+                for (let ra = 0; ra <= 360; ra += 15) {
+                    // 赤経・赤緯を直交座標に変換
+                    const phi = (90 - dec) * Math.PI / 180; // 天頂角（北極が0）
+                    const theta = ra * Math.PI / 180; // 方位角
+                    
+                    const x = starFieldRadius * Math.sin(phi) * Math.cos(theta);
+                    const y = starFieldRadius * Math.sin(phi) * Math.sin(theta);
+                    const z = starFieldRadius * Math.cos(phi);
+                    
+                    points.push({ x, y, z });
+                }
+                
+                // 線分を作成
+                for (let i = 0; i < points.length - 1; i++) {
+                    const lineElement = document.createElement('div');
+                    lineElement.className = 'grid-line grid-line-dec';
+                    lineElement.style.left = '50%';
+                    lineElement.style.top = '50%';
+                    
+                    starField.appendChild(lineElement);
+                    
+                    gridLines.push({
+                        element: lineElement,
+                        startPoint: points[i],
+                        endPoint: points[i + 1],
+                        type: 'dec'
+                    });
+                }
+                
+                // 赤緯ラベルを追加
+                if (dec % 30 === 0) { // 30度ごとにラベル
+                    const labelElement = document.createElement('div');
+                    labelElement.className = 'grid-label';
+                    labelElement.textContent = `${dec > 0 ? '+' : ''}${dec}°`;
+                    
+                    // ラベルを東(RA=6h)の位置に配置
+                    const phi = (90 - dec) * Math.PI / 180;
+                    const theta = (6 * 15) * Math.PI / 180; // RA=6h は 90度
+                    
+                    const x = starFieldRadius * Math.sin(phi) * Math.cos(theta);
+                    const y = starFieldRadius * Math.sin(phi) * Math.sin(theta);
+                    const z = starFieldRadius * Math.cos(phi);
+                    
+                    starField.appendChild(labelElement);
+                    
+                    gridLines.push({
+                        element: labelElement,
+                        x: x,
+                        y: y,
+                        z: z,
+                        type: 'label'
+                    });
+                }
+            }
+            
+            // 特別に天の赤道（赤緯0度）を強調表示
+            const equatorPoints = [];
+            for (let ra = 0; ra <= 360; ra += 10) {
+                const phi = 90 * Math.PI / 180; // 赤緯0度
+                const theta = ra * Math.PI / 180;
+                
+                const x = starFieldRadius * Math.sin(phi) * Math.cos(theta);
+                const y = starFieldRadius * Math.sin(phi) * Math.sin(theta);
+                const z = starFieldRadius * Math.cos(phi);
+                
+                equatorPoints.push({ x, y, z });
+            }
+            
+            // 天の赤道線を作成
+            for (let i = 0; i < equatorPoints.length - 1; i++) {
+                const lineElement = document.createElement('div');
+                lineElement.className = 'grid-line grid-line-dec';
+                lineElement.style.left = '50%';
+                lineElement.style.top = '50%';
+                lineElement.style.borderLeft = '2px solid rgba(255, 200, 100, 0.6)';
+                
+                starField.appendChild(lineElement);
+                
+                gridLines.push({
+                    element: lineElement,
+                    startPoint: equatorPoints[i],
+                    endPoint: equatorPoints[i + 1],
+                    type: 'equator'
+                });
+            }
+            
+            // 赤道ラベルを追加
+            const equatorLabelElement = document.createElement('div');
+            equatorLabelElement.className = 'grid-label';
+            equatorLabelElement.textContent = '赤道';
+            equatorLabelElement.style.color = 'rgba(255, 200, 100, 0.8)';
+            
+            // ラベルを東(RA=6h)の位置に配置
+            const eqPhi = 90 * Math.PI / 180;
+            const eqTheta = (6 * 15) * Math.PI / 180; // RA=6h
+            
+            const eqX = starFieldRadius * Math.sin(eqPhi) * Math.cos(eqTheta);
+            const eqY = starFieldRadius * Math.sin(eqPhi) * Math.sin(eqTheta);
+            const eqZ = starFieldRadius * Math.cos(eqPhi);
+            
+            starField.appendChild(equatorLabelElement);
+            
+            gridLines.push({
+                element: equatorLabelElement,
+                x: eqX,
+                y: eqY,
+                z: eqZ,
+                type: 'label'
+            });
+            
+            console.log(`天球グリッドを生成しました: ${gridLines.length}個の要素`);
+        }
+        
+        // グリッド表示切替機能
+        function toggleGrid() {
+            showGrid = !showGrid;
+            
+            if (showGrid) {
+                document.getElementById('toggleGridBtn').textContent = 'グリッドOFF';
+                generateCelestialGrid();
+                showMessage("天球グリッドを表示しています", 1000);
+            } else {
+                document.getElementById('toggleGridBtn').textContent = 'グリッドON';
+                // グリッド要素を非表示
+                gridLines.forEach(line => {
+                    if (line.element) {
+                        line.element.style.display = 'none';
+                    }
+                });
+                showMessage("天球グリッドを非表示にしました", 1000);
+            }
         }
         
         // 視点の更新（デバイスの方向に応じて星空を動かす）
@@ -727,12 +1007,160 @@
                     }
                 });
                 
+                // グリッド線を更新
+                updateGridLines(alphaRad, betaRad, gammaRad);
+                
                 // 方向表示を更新
                 updateDirection(viewAzimuth);
                 
             } catch (error) {
                 console.warn('視点更新エラー:', error);
             }
+        }
+        
+        // グリッド線の更新処理
+        function updateGridLines(alphaRad, betaRad, gammaRad) {
+            // 回転行列の要素
+            const sinAlpha = Math.sin(alphaRad);
+            const cosAlpha = Math.cos(alphaRad);
+            const sinBeta = Math.sin(betaRad);
+            const cosBeta = Math.cos(betaRad);
+            const sinGamma = Math.sin(gammaRad);
+            const cosGamma = Math.cos(gammaRad);
+            
+            // グリッドが非表示の場合は更新しない
+            if (!showGrid) return;
+            
+            // 各グリッド要素を更新
+            gridLines.forEach(line => {
+                if (line.type === 'label') {
+                    // ラベル要素の場合
+                    const viewX = -line.x;
+                    const viewY = -line.y;
+                    const viewZ = -line.z;
+                    
+                    // 方位角（アルファ）による回転
+                    const rotX1 = viewX * cosAlpha - viewZ * sinAlpha;
+                    const rotY1 = viewY;
+                    const rotZ1 = viewX * sinAlpha + viewZ * cosAlpha;
+                    
+                    // 仰角（ベータ）による回転
+                    const rotX2 = rotX1;
+                    const rotY2 = rotY1 * cosBeta - rotZ1 * sinBeta;
+                    const rotZ2 = rotY1 * sinBeta + rotZ1 * cosBeta;
+                    
+                    // 回転（ガンマ）による回転
+                    const rotX3 = rotX2 * cosGamma - rotY2 * sinGamma;
+                    const rotY3 = rotX2 * sinGamma + rotY2 * cosGamma;
+                    const rotZ3 = rotZ2;
+                    
+                    // パースペクティブ投影
+                    const perspective = 1000;
+                    const scale = perspective / (perspective + rotZ3);
+                    
+                    // スクリーン上の座標
+                    const screenX = rotX3 * scale + window.innerWidth / 2;
+                    const screenY = rotY3 * scale + window.innerHeight / 2;
+                    
+                    // 要素の位置を更新
+                    line.element.style.transform = `translate(${screenX}px, ${screenY}px)`;
+                    
+                    // 視界の外か後ろにある場合は非表示
+                    if (scale < 0.1 || rotZ3 > 0 || 
+                        screenX < 0 || screenX > window.innerWidth || 
+                        screenY < 0 || screenY > window.innerHeight) {
+                        line.element.style.display = 'none';
+                    } else {
+                        line.element.style.display = 'block';
+                        line.element.style.opacity = scale * 0.7;
+                    }
+                } else {
+                    // グリッド線の場合
+                    const startPoint = line.startPoint;
+                    const endPoint = line.endPoint;
+                    
+                    // 始点
+                    let viewX1 = -startPoint.x;
+                    let viewY1 = -startPoint.y;
+                    let viewZ1 = -startPoint.z;
+                    
+                    // 方位角（アルファ）による回転
+                    let rotX1a = viewX1 * cosAlpha - viewZ1 * sinAlpha;
+                    let rotY1a = viewY1;
+                    let rotZ1a = viewX1 * sinAlpha + viewZ1 * cosAlpha;
+                    
+                    // 仰角（ベータ）による回転
+                    let rotX1b = rotX1a;
+                    let rotY1b = rotY1a * cosBeta - rotZ1a * sinBeta;
+                    let rotZ1b = rotY1a * sinBeta + rotZ1a * cosBeta;
+                    
+                    // 回転（ガンマ）による回転
+                    let rotX1c = rotX1b * cosGamma - rotY1b * sinGamma;
+                    let rotY1c = rotX1b * sinGamma + rotY1b * cosGamma;
+                    let rotZ1c = rotZ1b;
+                    
+                    // 終点
+                    let viewX2 = -endPoint.x;
+                    let viewY2 = -endPoint.y;
+                    let viewZ2 = -endPoint.z;
+                    
+                    // 方位角（アルファ）による回転
+                    let rotX2a = viewX2 * cosAlpha - viewZ2 * sinAlpha;
+                    let rotY2a = viewY2;
+                    let rotZ2a = viewX2 * sinAlpha + viewZ2 * cosAlpha;
+                    
+                    // 仰角（ベータ）による回転
+                    let rotX2b = rotX2a;
+                    let rotY2b = rotY2a * cosBeta - rotZ2a * sinBeta;
+                    let rotZ2b = rotY2a * sinBeta + rotZ2a * cosBeta;
+                    
+                    // 回転（ガンマ）による回転
+                    let rotX2c = rotX2b * cosGamma - rotY2b * sinGamma;
+                    let rotY2c = rotX2b * sinGamma + rotY2b * cosGamma;
+                    let rotZ2c = rotZ2b;
+                    
+                    // パースペクティブ投影
+                    const perspective = 1000;
+                    let scale1 = perspective / (perspective + rotZ1c);
+                    let scale2 = perspective / (perspective + rotZ2c);
+                    
+                    // スクリーン上の座標
+                    let screenX1 = rotX1c * scale1 + window.innerWidth / 2;
+                    let screenY1 = rotY1c * scale1 + window.innerHeight / 2;
+                    let screenX2 = rotX2c * scale2 + window.innerWidth / 2;
+                    let screenY2 = rotY2c * scale2 + window.innerHeight / 2;
+                    
+                    // 線の両端が視界の外か後ろにある場合は非表示
+                    if ((scale1 < 0.1 && scale2 < 0.1) || 
+                        (rotZ1c > 0 && rotZ2c > 0) ||
+                        (screenX1 < 0 && screenX2 < 0) || 
+                        (screenX1 > window.innerWidth && screenX2 > window.innerWidth) || 
+                        (screenY1 < 0 && screenY2 < 0) || 
+                        (screenY1 > window.innerHeight && screenY2 > window.innerHeight)) {
+                        line.element.style.display = 'none';
+                        return;
+                    }
+                    
+                    // 線の位置と長さ、角度を計算
+                    const dx = screenX2 - screenX1;
+                    const dy = screenY2 - screenY1;
+                    const length = Math.sqrt(dx * dx + dy * dy);
+                    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+                    
+                    // 表示位置を始点に設定
+                    line.element.style.transform = `translate(${screenX1}px, ${screenY1}px) rotate(${angle}deg)`;
+                    line.element.style.width = `${length}px`;
+                    line.element.style.height = '1px';
+                    
+                    // 視界内に表示
+                    line.element.style.display = 'block';
+                    
+                    // 距離に応じて透明度を調整
+                    const avgScale = (scale1 + scale2) / 2;
+                    const opacity = line.type === 'equator' ? avgScale * 0.7 : avgScale * 0.4;
+                    line.element.style.opacity = opacity.toString();
+                }
+            });
         }
         
         // 画面の向き変更イベント処理
